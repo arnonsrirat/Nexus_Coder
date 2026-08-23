@@ -294,74 +294,99 @@ export class AppUpdater {
     });
   }
 
-  // Launches the update installer, restarts the application, and deletes temporary files
+  // Installs the downloaded update silently and brings the app straight back up.
+  //
+  // The setup binary is NexusCoder itself running in installer mode
+  // (electron/installer.cjs), so `--silent --install-dir=...` overwrites the
+  // current installation with no window and no clicks. A tiny batch runner does
+  // the work because the app has to exit before its own files can be replaced.
   applyUpdate() {
     if (!this.downloadedFilePath || !fs.existsSync(this.downloadedFilePath)) {
       throw new Error('No downloaded update file found to apply.');
     }
 
     const installerPath = path.resolve(this.downloadedFilePath);
+    const installerName = path.basename(installerPath);
     const tempDir = this.getTempUpdateDir();
     const batchPath = path.join(tempDir, 'run-update.cmd');
 
-    // Identify current executable path
-    let appExePath = process.execPath;
+    // The running executable is replaced in place by the installer, so the same
+    // path is the correct one to relaunch. Keep a default install location as a
+    // fallback for the (unpackaged) dev case.
+    const appExePath = process.execPath;
     const isPackaged = !appExePath.toLowerCase().endsWith('node.exe');
+    const fallbackExePath = path.join(
+      process.env.LOCALAPPDATA || os.homedir(),
+      'Programs', 'NexusCoder', 'NexusCoder.exe'
+    );
+    const relaunchPath = isPackaged ? appExePath : fallbackExePath;
+    // Install over the directory the running app lives in, so a custom install
+    // location chosen at setup time is preserved across updates.
+    const installDir = isPackaged ? path.dirname(appExePath) : path.dirname(fallbackExePath);
 
-    console.log(`🚀 Executing installer update: ${installerPath}`);
-    console.log(`📍 Current App Executable: ${appExePath} (isPackaged: ${isPackaged})`);
+    console.log(`🚀 Installing update silently: ${installerPath}`);
+    console.log(`📍 Will relaunch: ${relaunchPath} (isPackaged: ${isPackaged})`);
 
     try {
-      // Create a dedicated Windows batch runner that:
-      // 1. Waits for the current NexusCoder process to terminate
-      // 2. Runs the installer
-      // 3. Launches the newly updated application
-      // 4. Cleans up the installer file to free disk space
+      // 1. wait for this process to die  2. install silently  3. relaunch
+      // 4. delete the installer. Every step is quiet - the user should only see
+      // the app disappear and come back on the new version.
       const batchScript = `@echo off
 title NexusCoder Updater
-echo ========================================
-echo  Updating NexusCoder to latest version...
-echo ========================================
 timeout /t 1 /nobreak >nul
-taskkill /f /im NexusCoder.exe >nul 2>&1
-taskkill /f /im "NexusCoder 1.*.exe" >nul 2>&1
-echo Running installer...
-start /wait "" "${installerPath}"
+taskkill /f /im "NexusCoder.exe" >nul 2>&1
 timeout /t 1 /nobreak >nul
-echo Cleaning up installer cache...
+
+rem Unattended install straight over the current installation.
+set NEXUSCODER_SILENT_INSTALL=1
+set NEXUSCODER_INSTALL_DIR=${installDir}
+start /wait "" "${installerPath}" --silent "--install-dir=${installDir}"
+
+rem The NSIS stub can outlive the start /wait handle; make sure it is gone
+rem before launching, or the new binary may still be half-written.
+:waitinstaller
+tasklist /fi "imagename eq ${installerName}" 2>nul | find /i "${installerName}" >nul
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >nul
+  goto waitinstaller
+)
+
+start "" "${relaunchPath}"
+timeout /t 2 /nobreak >nul
 del /f /q "${installerPath}" >nul 2>&1
-echo Done.
+del /f /q "%~f0" >nul 2>&1
 exit
 `;
 
       fs.writeFileSync(batchPath, batchScript, 'utf8');
 
-      // Launch batch runner completely detached
+      // Detached and window-hidden: a black console flashing up mid-update
+      // looks like something went wrong.
       const child = spawn('cmd.exe', ['/c', batchPath], {
         detached: true,
         stdio: 'ignore',
-        windowsHide: false
+        windowsHide: true
       });
       child.unref();
 
-      // Gracefully terminate this process so the installer can update files
+      // Gracefully terminate this process so the installer can replace files.
       setTimeout(() => {
         process.exit(0);
       }, 800);
 
-      return { success: true, message: 'Installer launched. Application will restart shortly.' };
+      return { success: true, message: 'Installing update silently. NexusCoder will restart automatically.' };
     } catch (err) {
-      console.error('Failed to launch installer via batch:', err);
-      // Fallback: spawn installer directly
+      console.error('Failed to launch silent installer via batch:', err);
+      // Fallback: run the installer directly, still unattended.
       try {
-        const child = spawn(installerPath, [], {
+        const child = spawn(installerPath, ['--silent', `--install-dir=${installDir}`], {
           detached: true,
           stdio: 'ignore',
-          shell: true
+          windowsHide: true
         });
         child.unref();
         setTimeout(() => process.exit(0), 800);
-        return { success: true, message: 'Installer launched in direct mode.' };
+        return { success: true, message: 'Installer launched in direct silent mode.' };
       } catch (fallbackErr) {
         throw new Error(`Failed to execute update installer: ${err.message}`);
       }

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;" />
+<title>NexusCoder Setup</title>
+<style>
+  /* Liquid Glass, matching the studio's own palette. */
+  :root {
+    --bg: #070913;
+    --panel: rgba(15, 23, 42, 0.72);
+    --border: rgba(51, 65, 85, 0.8);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --cyan: #22d3ee;
+    --indigo: #6366f1;
+    --purple: #a855f7;
+    --rose: #f43f5e;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Noto Sans Thai", system-ui, sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* Ambient orbs, the same motif the app uses behind its glass panels. */
+  .orb { position: fixed; border-radius: 50%; filter: blur(70px); opacity: 0.5; pointer-events: none; }
+  .orb-1 { width: 320px; height: 320px; background: #0891b2; top: -120px; left: -90px; }
+  .orb-2 { width: 300px; height: 300px; background: #6d28d9; bottom: -140px; right: -80px; }
+  .orb-3 { width: 220px; height: 220px; background: #1d4ed8; top: 40%; right: 30%; opacity: 0.25; }
+
+  .shell { position: relative; height: 100%; display: flex; flex-direction: column; }
+
+  .titlebar {
+    height: 34px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 6px 0 14px;
+    -webkit-app-region: drag;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+    background: rgba(2, 6, 23, 0.6);
+  }
+  .titlebar span { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+  .close-btn {
+    -webkit-app-region: no-drag;
+    width: 30px; height: 24px; border: 0; border-radius: 6px;
+    background: transparent; color: var(--dim); font-size: 15px; cursor: pointer;
+  }
+  .close-btn:hover { background: rgba(244, 63, 94, 0.18); color: #fda4af; }
+
+  .body { flex: 1; padding: 22px 28px 18px; display: flex; flex-direction: column; min-height: 0; }
+
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .logo {
+    width: 52px; height: 52px; flex-shrink: 0; border-radius: 16px;
+    background: linear-gradient(135deg, var(--cyan), var(--indigo) 55%, var(--purple));
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 30px rgba(99, 102, 241, 0.35);
+  }
+  .logo svg { width: 26px; height: 26px; }
+  .brand h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand p { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .version {
+    display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-family: ui-monospace, Consolas, monospace;
+    background: rgba(34, 211, 238, 0.12); color: #67e8f9; border: 1px solid rgba(34, 211, 238, 0.3);
+  }
+
+  .field { margin-bottom: 16px; }
+  .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); margin-bottom: 7px; }
+
+  .path-row { display: flex; gap: 8px; }
+  .path-box {
+    flex: 1; min-width: 0; padding: 10px 12px; border-radius: 11px;
+    background: var(--panel); border: 1px solid var(--border);
+    font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .btn-ghost {
+    padding: 10px 16px; border-radius: 11px; border: 1px solid var(--border);
+    background: rgba(30, 41, 59, 0.7); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-ghost:hover { border-color: rgba(34, 211, 238, 0.55); color: #67e8f9; }
+
+  .check { display: flex; align-items: center; gap: 9px; padding: 7px 0; cursor: pointer; font-size: 12.5px; color: #cbd5e1; }
+  .check input { width: 15px; height: 15px; accent-color: var(--indigo); cursor: pointer; }
+
+  .progress-wrap { margin-top: auto; padding-top: 14px; }
+  .bar { height: 7px; border-radius: 999px; background: rgba(30, 41, 59, 0.9); overflow: hidden; }
+  .bar > div {
+    height: 100%; width: 0%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--cyan), var(--indigo));
+    transition: width 0.15s ease;
+  }
+  .status { margin-top: 8px; display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--muted); }
+  .status .detail { color: var(--dim); font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+
+  .footer { flex-shrink: 0; padding: 14px 28px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .hint { font-size: 11px; color: var(--dim); }
+
+  .btn-primary {
+    padding: 11px 30px; border: 0; border-radius: 12px; cursor: pointer;
+    background: linear-gradient(135deg, var(--cyan), var(--indigo));
+    color: #fff; font-size: 13px; font-weight: 700; font-family: inherit;
+    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.4);
+  }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+  .btn-danger { background: linear-gradient(135deg, #f43f5e, #b91c1c); box-shadow: 0 8px 24px rgba(190, 18, 60, 0.4); }
+
+  .done-icon {
+    width: 62px; height: 62px; margin: 0 auto 18px; border-radius: 50%;
+    background: linear-gradient(135deg, #10b981, #0891b2);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 12px 34px rgba(16, 185, 129, 0.35);
+  }
+  .center { text-align: center; margin: auto 0; }
+  .center h2 { font-size: 18px; margin-bottom: 8px; }
+  .center p { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+  .summary {
+    margin-top: 16px; padding: 12px 14px; border-radius: 12px; text-align: left;
+    background: var(--panel); border: 1px solid var(--border);
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--muted);
+    word-break: break-all;
+  }
+  .error-text { color: #fda4af; font-size: 12px; margin-top: 10px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <div class="shell">
+    <div class="titlebar">
+      <span id="titlebar-text">NexusCoder Setup</span>
+      <button class="close-btn" id="btn-close" title="ปิด">&#10005;</button>
+    </div>
+
+    <!-- Step 1: options -->
+    <div class="body" id="view-config">
+      <div class="brand">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </div>
+        <div>
+          <h1 id="app-title">NexusCoder Studio</h1>
+          <p>AI Agent Coding Studio · ตัวช่วยเขียนโค้ดอัตโนมัติ</p>
+          <span class="version" id="app-version">v—</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">ติดตั้งไปที่</div>
+        <div class="path-row">
+          <div class="path-box" id="install-path" title="">—</div>
+          <button class="btn-ghost" id="btn-browse">เลือก…</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">ตัวเลือก</div>
+        <label class="check"><input type="checkbox" id="opt-desktop" checked /> สร้างไอคอนบนเดสก์ท็อป</label>
+        <label class="check"><input type="checkbox" id="opt-startmenu" checked /> เพิ่มลงเมนู Start</label>
+        <label class="check"><input type="checkbox" id="opt-launch" checked /> เปิดโปรแกรมหลังติดตั้งเสร็จ</label>
+      </div>
+
+      <div class="progress-wrap hidden" id="progress-block">
+        <div class="bar"><div id="bar-fill"></div></div>
+        <div class="status">
+          <span id="status-text">กำลังเตรียมการติดตั้ง…</span>
+          <span class="detail" id="status-detail"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: finished -->
+    <div class="body hidden" id="view-done">
+      <div class="center">
+        <div class="done-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="30" height="30">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </div>
+        <h2>ติดตั้งเสร็จสมบูรณ์</h2>
+        <p>NexusCoder Studio พร้อมใช้งานแล้ว<br />เปิดได้จากเดสก์ท็อปหรือเมนู Start</p>
+        <div class="summary" id="done-summary"></div>
+      </div>
+    </div>
+
+    <!-- Uninstall confirmation -->
+    <div class="body hidden" id="view-uninstall">
+      <div class="center">
+        <div class="done-icon" style="background: linear-gradient(135deg, #f43f5e, #b91c1c); box-shadow: 0 12px 34px rgba(190,18,60,0.35);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+            <path d="M10 11v6M14 11v6"></path>
+          </svg>
+        </div>
+        <h2>ถอนการติดตั้ง NexusCoder?</h2>
+        <p>ไฟล์โปรแกรม ไอคอน และรายการในหน้า Apps &amp; features จะถูกลบทั้งหมด<br />ประวัติแชตและการตั้งค่าในโฟลเดอร์ผู้ใช้จะยังคงอยู่</p>
+        <div class="summary" id="uninstall-path"></div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span class="hint" id="footer-hint">พื้นที่ที่ต้องใช้ประมาณ 300 MB</span>
+      <button class="btn-primary" id="btn-action">ติดตั้ง</button>
+    </div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  const state = {
+    mode: 'install',
+    installDir: '',
+    exePath: '',
+    busy: false,
+    finished: false
+  };
+
+  function setProgress(percent, text, detail) {
+    $('progress-block').classList.remove('hidden');
+    $('bar-fill').style.width = Math.max(0, Math.min(100, percent)) + '%';
+    if (text) $('status-text').textContent = text;
+    $('status-detail').textContent = detail || '';
+  }
+
+  async function init() {
+    const info = await window.setup.getInfo();
+    state.mode = info.mode;
+    state.installDir = info.defaultDir;
+
+    $('app-title').textContent = info.appName;
+    $('app-version').textContent = 'v' + info.version;
+    $('install-path').textContent = info.defaultDir;
+    $('install-path').title = info.defaultDir;
+
+    if (info.mode === 'uninstall') {
+      $('titlebar-text').textContent = 'NexusCoder Uninstaller';
+      $('view-config').classList.add('hidden');
+      $('view-uninstall').classList.remove('hidden');
+      $('uninstall-path').textContent = info.defaultDir;
+      $('footer-hint').textContent = 'การถอนการติดตั้งย้อนกลับไม่ได้';
+      const btn = $('btn-action');
+      btn.textContent = 'ถอนการติดตั้ง';
+      btn.classList.add('btn-danger');
+    }
+
+    window.setup.onProgress((p) => {
+      setProgress(p.percent, p.message, p.detail);
+    });
+  }
+
+  $('btn-close').addEventListener('click', () => {
+    if (state.busy) return;
+    window.setup.close();
+  });
+
+  $('btn-browse').addEventListener('click', async () => {
+    if (state.busy) return;
+    const dir = await window.setup.browse();
+    if (dir) {
+      state.installDir = dir;
+      $('install-path').textContent = dir;
+      $('install-path').title = dir;
+    }
+  });
+
+  $('btn-action').addEventListener('click', async () => {
+    if (state.busy) return;
+
+    // Finished screen: the button becomes "open the app".
+    if (state.finished) {
+      await window.setup.launch(state.exePath);
+      return;
+    }
+
+    if (state.mode === 'uninstall') {
+      state.busy = true;
+      $('btn-action').disabled = true;
+      $('btn-action').textContent = 'กำลังถอนการติดตั้ง…';
+      await window.setup.uninstall();
+      return;
+    }
+
+    state.busy = true;
+    const btn = $('btn-action');
+    btn.disabled = true;
+    btn.textContent = 'กำลังติดตั้ง…';
+    $('btn-browse').disabled = true;
+    setProgress(1, 'กำลังเตรียมการติดตั้ง…');
+
+    const result = await window.setup.install({
+      installDir: state.installDir,
+      desktopShortcut: $('opt-desktop').checked,
+      startMenuShortcut: $('opt-startmenu').checked
+    });
+
+    state.busy = false;
+
+    if (!result.success) {
+      btn.disabled = false;
+      btn.textContent = 'ลองอีกครั้ง';
+      $('btn-browse').disabled = false;
+      setProgress(0, 'ติดตั้งไม่สำเร็จ');
+      $('status-detail').classList.add('error-text');
+      $('status-detail').textContent = result.error || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+      return;
+    }
+
+    state.exePath = result.exePath;
+    state.finished = true;
+
+    // Auto-launch when asked, otherwise show the finish screen.
+    if ($('opt-launch').checked) {
+      setProgress(100, 'กำลังเปิดโปรแกรม…');
+      setTimeout(() => window.setup.launch(result.exePath), 500);
+      return;
+    }
+
+    $('view-config').classList.add('hidden');
+    $('view-done').classList.remove('hidden');
+    $('done-summary').textContent =
+      result.installDir + '\n' + result.fileCount + ' ไฟล์ · ' + result.size;
+    $('footer-hint').textContent = 'ขอบคุณที่ใช้งาน NexusCoder';
+    btn.disabled = false;
+    btn.textContent = 'เปิดโปรแกรม';
+  });
+
+  init();
+</script>
+</body>
+</html>

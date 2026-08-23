@@ -14,6 +14,19 @@ if (!app) {
   process.exit(1);
 }
 
+// Setup / uninstall mode.
+//
+// The shipped "NexusCoder Setup <version>.exe" is this same binary: when it is
+// launched from the portable extraction under an installer-ish name (or with
+// --setup / --uninstall), we show our own setup window instead of the studio.
+// Keeps one Electron runtime for both jobs rather than shipping a second one.
+const installer = require('./installer.cjs');
+
+if (installer.isInstallerMode() || installer.isUninstallMode()) {
+  installer.startInstallerApp();
+  return;
+}
+
 // Low RAM & Low CPU hardware switches
 // Keeps V8 memory heap bounded and enables efficient GPU memory rasterization
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
