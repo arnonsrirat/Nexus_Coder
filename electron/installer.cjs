@@ -333,15 +333,28 @@ function startInstallerApp() {
   if (isSilentInstall()) {
     app.whenReady().then(async () => {
       const target = silentInstallDir();
+      // The downloaded file the batch script launches is an NSIS
+      // self-extracting "portable" stub - it extracts this app to a temp
+      // folder and runs it from there, and its own process can exit long
+      // before that extracted copy (this very process) finishes installing.
+      // Waiting on the stub's process name is therefore not a reliable
+      // "installation is done" signal. A marker file this process writes on
+      // its way out is: the batch script polls for it instead of guessing
+      // at process names, which was the actual cause of it relaunching too
+      // early (or never) and leaving a stray window behind.
+      const markerDir = path.join(os.tmpdir(), 'nexuscoder-update');
+      try { fs.mkdirSync(markerDir, { recursive: true }); } catch (e) {}
       try {
         await performInstall(
           { installDir: target, desktopShortcut: false, startMenuShortcut: false },
           (p) => console.log(`[silent-install] ${p.percent}% ${p.message || ''}`)
         );
         console.log(`[silent-install] completed -> ${target}`);
+        try { fs.writeFileSync(path.join(markerDir, 'install-done.marker'), String(Date.now())); } catch (e) {}
       } catch (err) {
         console.error('[silent-install] failed:', err.message);
         process.exitCode = 1;
+        try { fs.writeFileSync(path.join(markerDir, 'install-failed.marker'), err.message || 'unknown error'); } catch (e) {}
       }
       app.quit();
     });

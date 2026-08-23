@@ -306,9 +306,17 @@ export class AppUpdater {
     }
 
     const installerPath = path.resolve(this.downloadedFilePath);
-    const installerName = path.basename(installerPath);
     const tempDir = this.getTempUpdateDir();
     const batchPath = path.join(tempDir, 'run-update.cmd');
+    const vbsPath = path.join(tempDir, 'run-hidden.vbs');
+    const doneMarker = path.join(tempDir, 'install-done.marker');
+    const failMarker = path.join(tempDir, 'install-failed.marker');
+
+    // Clear stale markers from any previous update attempt, so the wait loop
+    // below can never read a leftover "done" file and think this run is
+    // finished before it has even started.
+    try { fs.unlinkSync(doneMarker); } catch (e) {}
+    try { fs.unlinkSync(failMarker); } catch (e) {}
 
     // The running executable is replaced in place by the installer, so the same
     // path is the correct one to relaunch. Keep a default install location as a
@@ -328,22 +336,31 @@ export class AppUpdater {
     console.log(`📍 Will relaunch: ${relaunchPath} (isPackaged: ${isPackaged})`);
 
     try {
-      // 1. wait for this process to die  2. install silently  3. relaunch
-      // 4. delete the installer. Every step is quiet - the user should only see
-      // the app disappear and come back on the new version.
+      // Two problems kept making this visibly "stuck", and both trace back
+      // to the same root cause: the downloaded file is an NSIS self-
+      // extracting "portable" stub, not the real installer. It unpacks this
+      // app to a temp folder and runs it from there - so:
+      //  - its own process can exit long before the extracted copy actually
+      //    finishes installing, which is why waiting on ANY process name
+      //    (the stub's, `start /wait`'s handle, a tasklist poll) was never a
+      //    reliable "done" signal - it either relaunched too early onto a
+      //    half-written binary, or the poll never matched and spun forever.
+      //  - the stub (or a console-subsystem step inside it) can allocate its
+      //    own console window on the interactive desktop; cmd.exe's own
+      //    CREATE_NO_WINDOW only hides *cmd's* window, not a child's.
       //
-      // Two things used to make this visibly "stuck":
-      //  - `start /wait "" installer.exe ...` hands the installer to a brand
-      //    new top-level process via `start`, which is what was giving it a
-      //    console window to attach to; running it as a plain command in this
-      //    (already hidden, CREATE_NO_WINDOW) cmd.exe still blocks until it
-      //    exits, with no extra process to spawn a window from.
-      //  - the tasklist poll loop below it had no exit condition. If the
-      //    installer ever failed to fully release its process for any reason,
-      //    this loop spun forever and the hidden cmd window - now with
-      //    nothing left to wait for - is exactly what a stuck "command
-      //    prompt" looks like. It is now bounded to 30s, after which it gives
-      //    up waiting and relaunches anyway rather than hanging indefinitely.
+      // Fixed by launching through WScript.Shell.Run with window style 0
+      // (SW_HIDE) - the standard, guaranteed-hidden way to run a process
+      // from a script regardless of its subsystem - and by having the
+      // installer (electron/installer.cjs) write a marker file when it
+      // actually finishes, so this script waits on real completion instead
+      // of guessing from a process name. Still bounded (45s) so a genuinely
+      // stuck installer can never hang this forever.
+      const vbsScript = `Set objShell = CreateObject("WScript.Shell")
+objShell.Run """${installerPath}"" --silent ""--install-dir=${installDir}""", 0, False
+`;
+      fs.writeFileSync(vbsPath, vbsScript, 'utf8');
+
       const batchScript = `@echo off
 title NexusCoder Updater
 rem Brief grace period for this process's own graceful process.exit(0) to
@@ -351,27 +368,29 @@ rem land before force-killing it, so no write is caught mid-flush.
 timeout /t 1 /nobreak >nul
 taskkill /f /im "NexusCoder.exe" >nul 2>&1
 
-rem Unattended install straight over the current installation.
+rem Unattended install straight over the current installation, launched
+rem fully hidden regardless of what subsystem the installer/stub is.
 set NEXUSCODER_SILENT_INSTALL=1
 set NEXUSCODER_INSTALL_DIR=${installDir}
-"${installerPath}" --silent "--install-dir=${installDir}"
+cscript //nologo //B "${vbsPath}"
 
-rem The NSIS stub can outlive its own process exit; make sure it is fully
-rem gone before launching, or the new binary may still be half-written.
-rem Bounded to 30s so a stuck installer can never hang this forever.
+rem Wait for the completion marker the installer writes when it is actually
+rem done, instead of tracking a process name. Bounded to 45s.
 set NEXUSCODER_WAIT_TRIES=0
 :waitinstaller
+if exist "${doneMarker}" goto relaunch
+if exist "${failMarker}" goto relaunch
 set /a NEXUSCODER_WAIT_TRIES+=1
-if %NEXUSCODER_WAIT_TRIES% gtr 30 goto relaunch
-tasklist /fi "imagename eq ${installerName}" 2>nul | find /i "${installerName}" >nul
-if not errorlevel 1 (
-  timeout /t 1 /nobreak >nul
-  goto waitinstaller
-)
+if %NEXUSCODER_WAIT_TRIES% gtr 45 goto relaunch
+timeout /t 1 /nobreak >nul
+goto waitinstaller
 
 :relaunch
 start "" "${relaunchPath}"
 del /f /q "${installerPath}" >nul 2>&1
+del /f /q "${vbsPath}" >nul 2>&1
+del /f /q "${doneMarker}" >nul 2>&1
+del /f /q "${failMarker}" >nul 2>&1
 del /f /q "%~f0" >nul 2>&1
 exit
 `;
