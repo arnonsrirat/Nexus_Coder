@@ -292,9 +292,24 @@ export function createApiRouter(agentEngine, configStore, appVersion = '0.0.0', 
     }
   });
 
-  router.delete('/chats/:id', (req, res) => {
+  router.delete('/chats/:id', async (req, res) => {
     try {
-      const deleted = agentEngine.sessionStore ? agentEngine.sessionStore.deleteSession(req.params.id) : false;
+      // If the chat being deleted is the one currently loaded in memory,
+      // saveCurrentSession() (called after almost every agent event) would
+      // otherwise happily write it right back to disk under the same id the
+      // moment anything next touches the engine - getSession() on a missing
+      // file just falls back to `{ id: currentSessionId }` and saves that.
+      // The delete would appear to work, then the "deleted" chat would
+      // reappear in the sidebar a moment later. Clearing the reference here
+      // (mirrors clearHistory()) stops that resurrection at the source.
+      if (req.params.id === agentEngine.currentSessionId) {
+        agentEngine.currentSessionId = null;
+        agentEngine.messages = [];
+        agentEngine.uiMessages = [];
+        agentEngine.activePlan = null;
+        agentEngine.activeCanvas = null;
+      }
+      const deleted = agentEngine.sessionStore ? await agentEngine.sessionStore.deleteSession(req.params.id) : false;
       res.json({ success: deleted });
     } catch (e) {
       res.status(500).json({ error: e.message });

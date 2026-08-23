@@ -76,16 +76,29 @@ export class SessionStore {
     }
   }
 
-  deleteSession(id) {
+  async deleteSession(id) {
     this.ensureDir();
     const filePath = path.join(SESSIONS_DIR, `${id}.json`);
-    if (fs.existsSync(filePath)) {
+    if (!fs.existsSync(filePath)) return true; // already gone - not a failure
+
+    // Windows refuses to unlink a file that still has an open handle. A
+    // session mid-autosave (saveCurrentSession runs after nearly every
+    // agent event) can hold the file open for a brief instant, which used
+    // to make delete fail outright with no retry and no visible error - the
+    // chat looked like it refused to delete. A few short retries covers
+    // that window without risking a real, prolonged hang. Real setTimeout
+    // delays (not a busy-wait) so this never blocks the event loop for
+    // other requests/WebSocket messages while it retries.
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         fs.unlinkSync(filePath);
         return true;
       } catch (e) {
-        console.error(`Error deleting session ${id}:`, e);
-        return false;
+        if (attempt === 4 || !['EBUSY', 'EPERM', 'EACCES'].includes(e.code)) {
+          console.error(`Error deleting session ${id}:`, e);
+          return false;
+        }
+        await new Promise(resolve => setTimeout(resolve, 60));
       }
     }
     return false;

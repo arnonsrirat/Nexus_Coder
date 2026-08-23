@@ -933,7 +933,17 @@ export function AppProvider({ children }) {
 
   const deleteChatSession = async (chatId) => {
     try {
-      await api.deleteChat(chatId);
+      // The server can genuinely fail to delete (e.g. a Windows file lock
+      // during autosave) and still answer HTTP 200 with { success: false }.
+      // That result used to go unchecked, so a failed delete looked
+      // identical to a successful one - the chat "wouldn't delete" with no
+      // explanation, because the code never actually looked at whether it
+      // had.
+      const result = await api.deleteChat(chatId);
+      if (!result?.success) {
+        alert('Could not delete this conversation - it may be in use. Please try again.');
+        return;
+      }
       if (currentChatId === chatId) {
         createNewChat();
       }
@@ -941,6 +951,7 @@ export function AppProvider({ children }) {
       if (res.chats) setChatSessions(res.chats);
     } catch (e) {
       console.error('Failed to delete chat:', e);
+      alert('Could not delete this conversation: ' + e.message);
     }
   };
 
