@@ -1,12 +1,30 @@
-# 🚀 NexusCoder Studio — Release Notes v1.0.25 (Composer Lockup Fix & Auto-Continue Cleanup)
+# 🚀 NexusCoder Studio — Release Notes v1.0.26 (Chat Delete Fix)
 
 **วันที่อัปเดต:** 24 สิงหาคม 2026  
-**เวอร์ชัน:** `1.0.25`  
+**เวอร์ชัน:** `1.0.26`  
 **สถานะการ Build:** ✅ สำเร็จ (Windows x64 — Custom Installer + Portable Executable, เซ็นใบรับรองครบ)
 
 ---
 
-## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.25
+## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.26
+
+### 1. 🗑️ แก้ลบประวัติแชทไม่ได้ (ลบแล้วยังค้างอยู่)
+* **สาเหตุที่ 1:** เซิร์ฟเวอร์ตอบกลับ HTTP 200 พร้อม `{success: false}` เวลาลบไม่สำเร็จ (เช่น ไฟล์โดน Windows ล็อกชั่วขณะระหว่างระบบ auto-save กำลังเขียนไฟล์นั้นอยู่พอดี) แต่ client เช็คแค่ HTTP status ไม่เคยเช็ค `success` field เลย เลยคิดว่าลบสำเร็จเสมอทั้งที่ไฟล์ยังอยู่
+* **สาเหตุที่ 2 (ร้ายแรงกว่า):** ถ้าแชทที่ลบเป็นแชทที่กำลังใช้งานอยู่ เซิร์ฟเวอร์ยังจำ id ไว้เป็น "แชทปัจจุบัน" ค้าง — auto-save รอบถัดไปเขียนไฟล์ด้วย id เดิมกลับมาใหม่ ไฟล์ที่เพิ่งลบไป**ฟื้นคืนชีพเอง**
+* **แก้ไข:** ล้าง reference แชทปัจจุบันในเซิร์ฟเวอร์ทันทีเมื่อลบแชทที่กำลังเปิดอยู่, เพิ่ม retry ลบไฟล์แบบไม่บล็อกเซิร์ฟเวอร์รองรับไฟล์ล็อกชั่วคราว, และฝั่ง client เช็คผลลัพธ์จริงแล้ว แจ้งเตือนชัดเจนถ้าลบไม่สำเร็จ
+
+---
+
+## 📄 สรุปจาก v1.0.25 (Composer Lockup Fix & Auto-Continue Cleanup)
+
+* แก้ปุ่มส่ง/แนบไฟล์ค้างกดไม่ได้ถาวรหลังล้าง/สลับแชท
+* เอาระบบเดาข้อความ "งานยังไม่เสร็จ" ออกทั้งหมด แก้ปัญหาตอบจบแล้วโดนสั่งทำต่อ ทั้งไทยและอังกฤษ
+
+รายละเอียดเต็มของ v1.0.25 ดูได้จากประวัติ git หรือ commit `chore: bump version to 1.0.25, release notes for composer lockup fix`
+
+---
+
+## 🛠️ (เดิม) รายการปรับปรุงและแก้บั๊กใน v1.0.25
 
 ### 1. ⌨️ แก้ปุ่มส่ง/แนบไฟล์ค้างกดไม่ได้ถาวรหลังล้าง/สลับแชท
 * **สาเหตุ:** ตัวแปร `isAgentBusy` (คุมว่าปุ่มส่งข้อความ/แนบไฟล์กดได้ไหม) คำนวณจากสถานะ `agentStatus` แต่ 3 จุดที่ควรรีเซ็ตสถานะกลับเป็นปกติ — **ล้างแชท (Clear Chat), สลับไปแชทอื่น, สร้างแชทใหม่** — รีเซ็ตแค่ตัวแปรความคืบหน้า (`agentProgress.isBusy`) แต่ไม่เคยรีเซ็ต `agentStatus` เลย
@@ -140,6 +158,6 @@
 
 | ประเภทไฟล์ | ชื่อไฟล์ | ขนาด | ลิงก์ไฟล์ |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | `NexusCoder Setup 1.0.25.exe` | ~92 MB | [เปิดไฟล์ติดตั้ง](file:///d:/Project/Project_Program/dist-exe/NexusCoder%20Setup%201.0.25.exe) |
-| **Portable Executable** | `NexusCoder 1.0.25.exe` | ~92 MB | [เปิดตัวพกพา](file:///d:/Project/Project_Program/dist-exe/NexusCoder%201.0.25.exe) |
+| **Windows Installer** | `NexusCoder Setup 1.0.26.exe` | ~92 MB | [เปิดไฟล์ติดตั้ง](file:///d:/Project/Project_Program/dist-exe/NexusCoder%20Setup%201.0.26.exe) |
+| **Portable Executable** | `NexusCoder 1.0.26.exe` | ~92 MB | [เปิดตัวพกพา](file:///d:/Project/Project_Program/dist-exe/NexusCoder%201.0.26.exe) |
 | **Unpacked Folder** | `dist-exe/win-unpacked/` | — | [เปิดโฟลเดอร์](file:///d:/Project/Project_Program/dist-exe/win-unpacked) |
