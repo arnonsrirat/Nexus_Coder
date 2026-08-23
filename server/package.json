@@ -1,0 +1,19 @@
+{
+  "name": "openrouter-agent-server",
+  "version": "1.0.7",
+  "description": "Backend engine for OpenRouter Agentic Coding Studio",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "diff": "^7.0.0",
+    "ws": "^8.18.0",
+    "chokidar": "^4.0.3"
+  }
+}

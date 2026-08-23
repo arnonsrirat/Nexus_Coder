@@ -1,0 +1,77 @@
+{
+  "name": "nexus-coder-studio",
+  "version": "1.0.7",
+  "description": "OpenRouter Agentic Coding Studio - Next-Gen GUI Replacement for Aider",
+  "author": "arnon_srirat",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "concurrently \"npm run server\" \"npm run client\"",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,magenta\" \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm start",
+    "client": "cd client && npm run dev",
+    "check:context": "node scripts/check-context-usage.cjs",
+    "build:client": "npm run check:context && cd client && npm run build",
+    "build:server": "npx esbuild server/index.js --bundle --platform=node --format=cjs --outfile=dist-server/server.cjs --external:electron",
+    "version:bump": "node scripts/bump-version.cjs",
+    "clean:dist": "node scripts/clean-dist.cjs",
+    "cert:generate": "powershell -ExecutionPolicy Bypass -File scripts/generate-cert.ps1",
+    "build:exe": "npm run clean:dist && npm run version:bump && npm run build:client && npm run build:server && electron-builder --win",
+    "electron:start": "npm run build:client && npm run build:server && electron ."
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3",
+    "cors": "^2.8.5",
+    "diff": "^7.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "build": {
+    "appId": "com.nexuscoder.app",
+    "productName": "NexusCoder",
+    "asar": false,
+    "directories": {
+      "output": "dist-exe"
+    },
+    "files": [
+      "electron/**/*",
+      "dist-server/**/*",
+      "client/dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signtoolOptions": {
+        "certificateFile": "build/nexus-code-signing.pfx",
+        "certificatePassword": "NexusCoder123!",
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "include": "build/installer.nsh"
+    }
+  }
+}
