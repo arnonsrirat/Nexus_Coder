@@ -1,6 +1,6 @@
 {
   "name": "openrouter-agent-server",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "description": "Backend engine for OpenRouter Agentic Coding Studio",
   "main": "index.js",
   "type": "module",
