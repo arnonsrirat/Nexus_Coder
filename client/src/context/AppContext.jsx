@@ -394,6 +394,13 @@ export function AppProvider({ children }) {
               setActivePlan(data.chat.activePlan || null);
               setActiveCanvas(data.chat.activeCanvas || null);
               setPendingPrompt(null);
+              // Same fix as clearChat: without this, switching away from a
+              // chat while agentStatus was stuck non-idle (mid-run, or from
+              // an earlier glitch) carried isAgentBusy=true into the chat you
+              // switched to, permanently disabling send/attach there even
+              // though nothing was actually running for it.
+              setAgentStatus('idle');
+              setAgentProgress({ isBusy: false, phase: 'idle', percent: 0, stepText: '', startedAt: null, toolName: '', iteration: 1 });
             }
             break;
 
@@ -405,6 +412,8 @@ export function AppProvider({ children }) {
               setActivePlan(null);
               setActiveCanvas(null);
               setPendingPrompt(null);
+              setAgentStatus('idle');
+              setAgentProgress({ isBusy: false, phase: 'idle', percent: 0, stepText: '', startedAt: null, toolName: '', iteration: 1 });
               api.fetchChats().then(res => res.chats && setChatSessions(res.chats)).catch(console.error);
             }
             break;
@@ -877,6 +886,14 @@ export function AppProvider({ children }) {
     setActivePlan(null);
     setActiveCanvas(null);
     setPendingPrompt(null);
+    // isAgentBusy (which disables the send/attach buttons) is
+    // `agentStatus === 'streaming' || 'executing_tool' || agentProgress.isBusy`
+    // - this used to reset only agentProgress.isBusy, so if agentStatus was
+    // anything other than idle at the moment of clearing (still mid-run, or
+    // stuck from an earlier glitch), isAgentBusy stayed permanently true
+    // afterward: the chat looked empty and normal, but the send button and
+    // attach button were disabled forever, with no visible reason why.
+    setAgentStatus('idle');
     setAgentProgress({
       isBusy: false,
       phase: 'idle',

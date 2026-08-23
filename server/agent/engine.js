@@ -543,6 +543,22 @@ export class AgentEngine {
    * Decide whether an assistant turn that made no tool call actually left work
    * on the table. Returns a short human-readable reason, or null when the run
    * looks genuinely complete.
+   *
+   * This used to also guess from the reply's TEXT - phrases like "next I'll
+   * fix..." or Thai "กำลังจะ..." meant "still working". That guess kept
+   * false-positiving on ordinary, complete answers (tightening it to
+   * "only the last ~220 chars, and only with a real verb" cut down the Thai
+   * false-positives, but the same class of misfire kept happening in English
+   * too - any natural closing remark that merely LOOKS like an announced
+   * next step). A complete answer would then get auto-continued anyway,
+   * confusing the model into a short/empty follow-up right after it had
+   * already finished - which is exactly what looked like "answering, then
+   * disappearing". Text-guessing is inherently unreliable for this, so it's
+   * gone: only the plan's own step status is used now, which is a fact the
+   * model itself reported via update_plan, not a guess about phrasing.
+   * Genuinely cut-off or empty replies are caught separately in runLoop via
+   * finish_reason and empty-content checks - those are hard signals, not
+   * text pattern matching.
    */
   detectUnfinishedWork(content) {
     // Only autonomous modes act on their own; ask/plan modes answer and stop.
@@ -555,36 +571,6 @@ export class AgentEngine {
         const names = remaining.slice(0, 3).map(s => s.title).join(', ');
         return `${remaining.length} plan step(s) still open: ${names}`;
       }
-    }
-
-    const text = (content || '').trim();
-    if (!text) return null;
-
-    // Only the TAIL of the message matters: a genuine "I'm about to do X"
-    // that never happened is, by construction, the last thing said before
-    // the model stopped. The old patterns scanned the whole message, so
-    // common Thai words like "ต่อไป" (next / going forward) or "กำลังจะ"
-    // (about to) appearing ANYWHERE - completely normal in ordinary Thai
-    // explanatory prose - flagged an already-complete answer as unfinished.
-    // A short reply rarely contains these words by chance; a longer, fully
-    // correct Thai answer almost always does somewhere in the middle, which
-    // is exactly why longer replies were the ones that looked like they
-    // "broke" right after finishing: the agent auto-continued a task that
-    // was already done, confusing the model into a short/empty follow-up.
-    const tail = text.slice(-220);
-
-    const intentPatterns = [
-      /\b(next|now)[,]?\s+(i|we)('?ll| will| am going to| going to)\s+(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
-      /\b(i|we)('?ll| will| am going to| going to)\s+(now\s+)?(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
-      /\blet me\s+(now\s+)?(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
-      /\b(proceeding|continuing|moving on) (to|with)\b/i,
-      // Thai patterns now require an actual action verb right after the
-      // intent word, not just the bare word floating anywhere.
-      /(ต่อไปนี้(ผม|ฉัน|เรา)จะ|กำลังจะ(ทำ|แก้|เขียน|สร้าง|เช็ค|ตรวจสอบ|เพิ่ม|ลบ|ปรับ|รัน|ดำเนินการ)|เดี๋ยว(ผม|ฉัน|เรา)(จะ|ทำ))/
-    ];
-
-    if (intentPatterns.some(re => re.test(tail))) {
-      return 'the last message announced a next action but performed none';
     }
 
     return null;
