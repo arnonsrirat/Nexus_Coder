@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import MessageItem from './MessageItem';
 import InteractivePrompt from './InteractivePrompt';
-import AgentThinkingCard from './AgentThinkingCard';
+import AgentStatusPulse from './AgentStatusPulse';
 import StreamingMessage from './StreamingMessage';
 import ChatComposer from './ChatComposer';
 import {
@@ -22,7 +22,7 @@ import {
  *
  * This component intentionally does NOT read the live token stream. The
  * streaming text and the progress card subscribe to it themselves
- * (see StreamingMessage / AgentThinkingCard), which keeps the transcript from
+ * (see StreamingMessage / AgentStatusPulse), which keeps the transcript from
  * re-rendering on every token.
  */
 export default function ChatContainer() {
@@ -155,7 +155,7 @@ export default function ChatContainer() {
         ))}
 
         {/* Real-time Thinking & Progress Card */}
-        {isAgentBusy && <AgentThinkingCard />}
+        {isAgentBusy && <AgentStatusPulse />}
 
         {/* Real-time Streaming Assistant Chunk (subscribes to the stream itself) */}
         <StreamingMessage />

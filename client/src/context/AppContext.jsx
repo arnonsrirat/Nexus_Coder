@@ -80,6 +80,10 @@ export function AppProvider({ children }) {
   // Both content and reasoning share one flush, so a burst of either can never
   // starve the other the way two competing timers used to.
   const streamBufferRef = useRef({ content: '', reasoning: '' });
+  // Id of the most recent optimistically-rendered user message, so the
+  // server's authoritative echo (message_added) can replace it in place
+  // instead of appearing as a duplicate.
+  const pendingUserMessageIdRef = useRef(null);
   const streamTimerRef = useRef(null);
   const streamRafRef = useRef(null);
 
@@ -326,7 +330,19 @@ export function AppProvider({ children }) {
             break;
 
           case 'message_added':
-            setMessages(prev => [...prev, data]);
+            if (data.role === 'user' && pendingUserMessageIdRef.current) {
+              const pendingId = pendingUserMessageIdRef.current;
+              pendingUserMessageIdRef.current = null;
+              setMessages(prev => {
+                const idx = prev.findIndex(m => m.id === pendingId);
+                if (idx === -1) return [...prev, data];
+                const updated = [...prev];
+                updated[idx] = data;
+                return updated;
+              });
+            } else {
+              setMessages(prev => [...prev, data]);
+            }
             break;
 
           case 'sessions_updated':
@@ -611,6 +627,11 @@ export function AppProvider({ children }) {
             break;
 
           case 'error': {
+            // A rejected start_task (e.g. "Agent is already running") means
+            // no 'message_added' will ever arrive to resolve the optimistic
+            // user message - clear the ref so it doesn't get mistakenly
+            // matched against a later, unrelated send.
+            pendingUserMessageIdRef.current = null;
             // There used to be a second, later `case 'error':` in this same
             // switch that always pushed a visible chat message - but a JS
             // switch only ever runs the FIRST matching case, so that block
@@ -745,6 +766,29 @@ export function AppProvider({ children }) {
       alert('WebSocket is not connected to backend.');
       return;
     }
+    // Show the user's own message immediately instead of waiting for the
+    // server to echo it back over 'message_added'. Previously, if that
+    // round-trip was ever interrupted (a connection hiccup, the server
+    // rejecting the request), the message the user just typed never
+    // appeared anywhere - it looked like the whole chat had vanished before
+    // the AI even had a chance to respond. The 'message_added' handler below
+    // replaces this placeholder with the server's authoritative copy once it
+    // arrives, so nothing is duplicated.
+    const pendingId = `pending_user_${Date.now()}`;
+    setMessages(prev => [
+      ...prev,
+      {
+        id: pendingId,
+        role: 'user',
+        content: text,
+        displayContent: text,
+        media: media,
+        pending: true,
+        timestamp: Date.now()
+      }
+    ]);
+    pendingUserMessageIdRef.current = pendingId;
+
     setAgentStatus('streaming');
     setAgentProgress({
       isBusy: true,
