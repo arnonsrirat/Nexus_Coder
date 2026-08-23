@@ -560,17 +560,30 @@ export class AgentEngine {
     const text = (content || '').trim();
     if (!text) return null;
 
-    // Phrases that announce an action instead of reporting one. Thai included
-    // because the UI is used bilingually.
+    // Only the TAIL of the message matters: a genuine "I'm about to do X"
+    // that never happened is, by construction, the last thing said before
+    // the model stopped. The old patterns scanned the whole message, so
+    // common Thai words like "ต่อไป" (next / going forward) or "กำลังจะ"
+    // (about to) appearing ANYWHERE - completely normal in ordinary Thai
+    // explanatory prose - flagged an already-complete answer as unfinished.
+    // A short reply rarely contains these words by chance; a longer, fully
+    // correct Thai answer almost always does somewhere in the middle, which
+    // is exactly why longer replies were the ones that looked like they
+    // "broke" right after finishing: the agent auto-continued a task that
+    // was already done, confusing the model into a short/empty follow-up.
+    const tail = text.slice(-220);
+
     const intentPatterns = [
-      /\b(next|now)[,]?\s+(i|we)('?ll| will| am going to| going to)\b/i,
+      /\b(next|now)[,]?\s+(i|we)('?ll| will| am going to| going to)\s+(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
       /\b(i|we)('?ll| will| am going to| going to)\s+(now\s+)?(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
       /\blet me\s+(now\s+)?(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
       /\b(proceeding|continuing|moving on) (to|with)\b/i,
-      /(ต่อไป|ขั้นตอนถัดไป|กำลังจะ|เดี๋ยว(ผม|ฉัน|เรา))/
+      // Thai patterns now require an actual action verb right after the
+      // intent word, not just the bare word floating anywhere.
+      /(ต่อไปนี้(ผม|ฉัน|เรา)จะ|กำลังจะ(ทำ|แก้|เขียน|สร้าง|เช็ค|ตรวจสอบ|เพิ่ม|ลบ|ปรับ|รัน|ดำเนินการ)|เดี๋ยว(ผม|ฉัน|เรา)(จะ|ทำ))/
     ];
 
-    if (intentPatterns.some(re => re.test(text))) {
+    if (intentPatterns.some(re => re.test(tail))) {
       return 'the last message announced a next action but performed none';
     }
 
@@ -749,9 +762,25 @@ export class AgentEngine {
           // Without this check the run ended right there and looked like the
           // agent had answered and then vanished.
           const wasTruncated = response.finishReason === 'length';
+          // Some models/providers occasionally return a completion with no
+          // text at all (an empty choice, a content filter, a "thinking"
+          // turn that used its whole budget and produced nothing) - the
+          // stream_end push above only adds a chat bubble when content,
+          // reasoning, or a tool call is non-empty, so a fully empty turn
+          // added NOTHING to the transcript. Combined with detectUnfinished
+          // Work() explicitly returning null for empty text (it only looks
+          // for "announced but didn't do it" phrases), the run then silently
+          // marked itself "completed" with literally nothing shown - the
+          // spinner just stops and the chat goes completely silent, which is
+          // indistinguishable from the agent having crashed.
+          const wasEmpty = !wasTruncated
+            && (finalContent || '').trim().length === 0
+            && (finalReasoning || '').trim().length === 0;
           const unfinished = wasTruncated
             ? 'the previous reply was cut off by the max output length limit'
-            : this.detectUnfinishedWork(finalContent);
+            : wasEmpty
+              ? 'the previous reply came back completely empty - no text was generated'
+              : this.detectUnfinishedWork(finalContent);
           if (unfinished && this.autoContinueCount < this.maxAutoContinues) {
             this.autoContinueCount++;
             this.messages.push({
@@ -759,10 +788,13 @@ export class AgentEngine {
               content: wasTruncated
                 ? '[system] Your previous reply was cut off by the output length limit before it finished. ' +
                   'Continue exactly where you left off - do not repeat what you already said.'
-                : `[system] The task is not finished yet (${unfinished}). ` +
-                  'Continue working now without asking for confirmation: call the ' +
-                  'next tool required to make progress. If the task really is ' +
-                  'complete, reply with a short final summary and no tool call.'
+                : wasEmpty
+                  ? '[system] Your previous reply came back completely empty - no answer was generated. ' +
+                    "Answer the user's last message now, directly and completely."
+                  : `[system] The task is not finished yet (${unfinished}). ` +
+                    'Continue working now without asking for confirmation: call the ' +
+                    'next tool required to make progress. If the task really is ' +
+                    'complete, reply with a short final summary and no tool call.'
             });
             this.emit('agent_progress', {
               phase: 'thinking',
@@ -772,6 +804,20 @@ export class AgentEngine {
             });
             this.saveCurrentSession();
             continue;
+          }
+
+          // Reaching here with wasEmpty still true means every retry also
+          // came back empty. Never let that resolve as a silent "Task
+          // completed" - tell the user plainly instead of leaving them
+          // staring at a chat that just stopped.
+          if (wasEmpty) {
+            const noticeMsg = {
+              id: `err_${Date.now()}`,
+              role: 'system_error',
+              content: 'NexusCoder ไม่ได้ตอบกลับหลังจากลองหลายครั้ง (โมเดลส่งคำตอบว่างเปล่ากลับมา) อาจเกิดจากตัวโมเดลที่เลือกไว้ หรือปัญหาฝั่งผู้ให้บริการชั่วคราว ลองส่งใหม่อีกครั้ง หรือเปลี่ยนโมเดลในหน้าตั้งค่า',
+              timestamp: Date.now()
+            };
+            this.addUiMessage(noticeMsg);
           }
 
           this.isRunning = false;
