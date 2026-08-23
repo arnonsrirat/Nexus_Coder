@@ -331,28 +331,46 @@ export class AppUpdater {
       // 1. wait for this process to die  2. install silently  3. relaunch
       // 4. delete the installer. Every step is quiet - the user should only see
       // the app disappear and come back on the new version.
+      //
+      // Two things used to make this visibly "stuck":
+      //  - `start /wait "" installer.exe ...` hands the installer to a brand
+      //    new top-level process via `start`, which is what was giving it a
+      //    console window to attach to; running it as a plain command in this
+      //    (already hidden, CREATE_NO_WINDOW) cmd.exe still blocks until it
+      //    exits, with no extra process to spawn a window from.
+      //  - the tasklist poll loop below it had no exit condition. If the
+      //    installer ever failed to fully release its process for any reason,
+      //    this loop spun forever and the hidden cmd window - now with
+      //    nothing left to wait for - is exactly what a stuck "command
+      //    prompt" looks like. It is now bounded to 30s, after which it gives
+      //    up waiting and relaunches anyway rather than hanging indefinitely.
       const batchScript = `@echo off
 title NexusCoder Updater
+rem Brief grace period for this process's own graceful process.exit(0) to
+rem land before force-killing it, so no write is caught mid-flush.
 timeout /t 1 /nobreak >nul
 taskkill /f /im "NexusCoder.exe" >nul 2>&1
-timeout /t 1 /nobreak >nul
 
 rem Unattended install straight over the current installation.
 set NEXUSCODER_SILENT_INSTALL=1
 set NEXUSCODER_INSTALL_DIR=${installDir}
-start /wait "" "${installerPath}" --silent "--install-dir=${installDir}"
+"${installerPath}" --silent "--install-dir=${installDir}"
 
-rem The NSIS stub can outlive the start /wait handle; make sure it is gone
-rem before launching, or the new binary may still be half-written.
+rem The NSIS stub can outlive its own process exit; make sure it is fully
+rem gone before launching, or the new binary may still be half-written.
+rem Bounded to 30s so a stuck installer can never hang this forever.
+set NEXUSCODER_WAIT_TRIES=0
 :waitinstaller
+set /a NEXUSCODER_WAIT_TRIES+=1
+if %NEXUSCODER_WAIT_TRIES% gtr 30 goto relaunch
 tasklist /fi "imagename eq ${installerName}" 2>nul | find /i "${installerName}" >nul
 if not errorlevel 1 (
   timeout /t 1 /nobreak >nul
   goto waitinstaller
 )
 
+:relaunch
 start "" "${relaunchPath}"
-timeout /t 2 /nobreak >nul
 del /f /q "${installerPath}" >nul 2>&1
 del /f /q "%~f0" >nul 2>&1
 exit
