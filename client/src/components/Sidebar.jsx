@@ -14,7 +14,8 @@ import {
   RotateCw, 
   FileDiff,
   Layers,
-  MessageSquare
+  MessageSquare,
+  PanelLeftClose
 } from 'lucide-react';
 
 function getFileIcon(fileName) {
@@ -124,7 +125,8 @@ export default function Sidebar() {
     fileDiffs,
     chatSessions,
     setActiveDiff,
-    activeDiff
+    activeDiff,
+    togglePanelVisibility
   } = useApp();
 
   return (
@@ -175,6 +177,15 @@ export default function Sidebar() {
               {fileDiffs.length}
             </span>
           )}
+        </button>
+
+        {/* Collapse Sidebar Button */}
+        <button
+          onClick={() => togglePanelVisibility('sidebar')}
+          className="ml-auto my-auto p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-200 transition-colors"
+          title="Collapse Explorer (พับเก็บแถบข้าง)"
+        >
+          <PanelLeftClose className="w-3.5 h-3.5" />
         </button>
       </div>
 

@@ -42,9 +42,18 @@ export function AppProvider({ children }) {
 
   // Agent State & Modes
   const [messages, setMessages] = useState([]);
-  const [agentMode, setAgentMode] = useState('agent'); // 'agent' | 'plan' | 'ask'
+  const [agentMode, setAgentMode] = useState('agent'); // 'agent' | 'plan' | 'ask' | 'system'
   const [reasoningEffort, setReasoningEffort] = useState('medium'); // 'high' | 'medium' | 'low' | 'off'
   const [agentStatus, setAgentStatus] = useState('idle'); // 'idle' | 'streaming' | 'executing_tool' | 'waiting_input' | 'stopped'
+  const [agentProgress, setAgentProgress] = useState({
+    isBusy: false,
+    phase: 'idle',
+    percent: 0,
+    stepText: '',
+    startedAt: null,
+    toolName: '',
+    iteration: 1
+  });
   const [streamData, setStreamData] = useState({ content: '', reasoning: '', toolCalls: [] });
   const [pendingPrompt, setPendingPrompt] = useState(null); // { id, type, question, options, allowCustomInput, toolName, toolArgs }
   const [agentStepLog, setAgentStepLog] = useState('');
@@ -68,8 +77,20 @@ export function AppProvider({ children }) {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState([]);
 
-  // Resizable layout panel sizes (persisted per user)
-  const { panelSizes, resizePanel, resetPanel, resetAllPanels } = usePanelSizes();
+  // Resizable layout panel sizes, custom ordering and collapsibility (persisted per user)
+  const {
+    panelSizes,
+    panelOrder,
+    panelVisibility,
+    resizePanel,
+    resetPanel,
+    resetAllPanels,
+    togglePanelVisibility,
+    setPanelVisibility,
+    movePanel,
+    reorderPanels,
+    resetLayout
+  } = usePanelSizes();
 
   // WebSocket reference
   const wsRef = useRef(null);
@@ -266,6 +287,30 @@ export function AppProvider({ children }) {
             api.fetchChats().then(res => res.chats && setChatSessions(res.chats)).catch(console.error);
             break;
 
+          case 'status_change':
+            if (data.status) setUpdateStatus(data.status);
+            if (data.updateInfo) setUpdateInfo(data.updateInfo);
+            if (data.downloadProgress) setUpdateProgress(data.downloadProgress);
+            break;
+
+          case 'update_progress':
+            setUpdateProgress(data);
+            break;
+
+          case 'update_ready':
+            setUpdateStatus('ready');
+            if (data.version) {
+              setUpdateInfo(prev => ({ ...prev, latestVersion: data.version }));
+            }
+            break;
+
+          case 'update_error':
+            setUpdateStatus('error');
+            if (data.message) {
+              setUpdateInfo(prev => ({ ...prev, error: data.message }));
+            }
+            break;
+
           case 'chat_switched':
             if (data.chat) {
               setCurrentChatId(data.chat.id);
@@ -292,8 +337,30 @@ export function AppProvider({ children }) {
             }
             break;
 
+          case 'agent_progress':
+            setAgentProgress(prev => ({
+              ...prev,
+              isBusy: data.phase !== 'completed' && data.phase !== 'stopped',
+              phase: data.phase || prev.phase,
+              percent: data.percent !== undefined ? data.percent : prev.percent,
+              stepText: data.step || prev.stepText,
+              toolName: data.toolName || '',
+              iteration: data.iteration || prev.iteration || 1,
+              startedAt: prev.startedAt || Date.now()
+            }));
+            if (data.step) setAgentStepLog(data.step);
+            break;
+
           case 'stream_start':
             setAgentStatus('streaming');
+            setAgentProgress(prev => ({
+              ...prev,
+              isBusy: true,
+              phase: (prev.phase === 'reading_context' || prev.phase === 'idle') ? 'thinking' : prev.phase,
+              percent: Math.max(prev.percent || 0, 30),
+              stepText: prev.stepText || 'NexusCoder is thinking...',
+              startedAt: prev.startedAt || Date.now()
+            }));
             if (streamTimerRef.current) clearTimeout(streamTimerRef.current);
             streamBufferRef.current = { content: '', reasoning: '' };
             setStreamData({ content: '', reasoning: '', toolCalls: [] });
@@ -305,7 +372,7 @@ export function AppProvider({ children }) {
               streamTimerRef.current = setTimeout(() => {
                 setStreamData(prev => ({ ...prev, content: streamBufferRef.current.content }));
                 streamTimerRef.current = null;
-              }, 35);
+              }, 40);
             }
             break;
 
@@ -315,7 +382,7 @@ export function AppProvider({ children }) {
               streamTimerRef.current = setTimeout(() => {
                 setStreamData(prev => ({ ...prev, reasoning: streamBufferRef.current.reasoning }));
                 streamTimerRef.current = null;
-              }, 35);
+              }, 40);
             }
             break;
 
@@ -325,17 +392,40 @@ export function AppProvider({ children }) {
               streamTimerRef.current = null;
             }
             setAgentStatus('executing_tool');
-            setMessages(prev => [
-              ...prev,
-              {
-                id: data.messageId,
-                role: 'assistant',
-                content: data.content,
-                reasoning: data.reasoning,
-                toolCalls: data.toolCalls,
-                timestamp: Date.now()
-              }
-            ]);
+            const endContent = (data.content !== undefined && data.content !== null && data.content !== '')
+              ? data.content 
+              : (streamBufferRef.current.content || streamData.content || '');
+            const endReasoning = (data.reasoning !== undefined && data.reasoning !== null && data.reasoning !== '')
+              ? data.reasoning 
+              : (streamBufferRef.current.reasoning || streamData.reasoning || '');
+            
+            if (endContent || endReasoning || (data.toolCalls && data.toolCalls.length > 0)) {
+              setMessages(prev => {
+                const existingIdx = prev.findIndex(m => m.id === data.messageId);
+                if (existingIdx !== -1) {
+                  const updated = [...prev];
+                  updated[existingIdx] = {
+                    ...updated[existingIdx],
+                    content: endContent,
+                    reasoning: endReasoning,
+                    toolCalls: data.toolCalls
+                  };
+                  return updated;
+                }
+                return [
+                  ...prev,
+                  {
+                    id: data.messageId,
+                    role: 'assistant',
+                    content: endContent,
+                    reasoning: endReasoning,
+                    toolCalls: data.toolCalls,
+                    timestamp: Date.now()
+                  }
+                ];
+              });
+            }
+            streamBufferRef.current = { content: '', reasoning: '' };
             setStreamData({ content: '', reasoning: '', toolCalls: [] });
             api.fetchChats().then(res => res.chats && setChatSessions(res.chats)).catch(console.error);
             break;
@@ -378,9 +468,23 @@ export function AppProvider({ children }) {
           case 'tool_call_start':
             setAgentStatus('executing_tool');
             setAgentStepLog(`Running: ${data.name}...`);
+            setAgentProgress(prev => ({
+              ...prev,
+              phase: 'tool_executing',
+              percent: 85,
+              stepText: `Running action: ${data.name}...`,
+              toolName: data.name
+            }));
             break;
 
           case 'tool_call_result':
+            setAgentProgress(prev => ({
+              ...prev,
+              phase: 'tool_completed',
+              percent: 90,
+              stepText: `Completed action: ${data.name}. Analyzing results...`,
+              toolName: data.name
+            }));
             setMessages(prev => [
               ...prev,
               {
@@ -412,6 +516,13 @@ export function AppProvider({ children }) {
           case 'agent_completed':
             setAgentStatus('idle');
             setAgentStepLog('');
+            setAgentProgress(prev => ({
+              ...prev,
+              isBusy: false,
+              phase: 'completed',
+              percent: 100,
+              stepText: 'Task completed.'
+            }));
             break;
 
           case 'agent_max_iterations':
@@ -419,6 +530,12 @@ export function AppProvider({ children }) {
             // the agent looked like it had silently vanished.
             setAgentStatus('paused');
             setAgentStepLog('');
+            setAgentProgress(prev => ({
+              ...prev,
+              isBusy: false,
+              phase: 'paused',
+              stepText: 'Paused at step limit.'
+            }));
             setMessages(prev => [
               ...prev,
               {
@@ -431,9 +548,55 @@ export function AppProvider({ children }) {
             ]);
             break;
 
+          case 'error':
+            if (streamBufferRef.current.content || streamData.content) {
+              const partial = streamBufferRef.current.content || streamData.content;
+              setMessages(prev => [
+                ...prev,
+                {
+                  id: `msg_${Date.now()}_interrupted`,
+                  role: 'assistant',
+                  content: partial,
+                  timestamp: Date.now()
+                }
+              ]);
+            }
+            streamBufferRef.current = { content: '', reasoning: '' };
+            setStreamData({ content: '', reasoning: '', toolCalls: [] });
+            setAgentStatus('idle');
+            setAgentProgress(prev => ({
+              ...prev,
+              isBusy: false,
+              phase: 'stopped',
+              percent: 0,
+              stepText: `Error: ${data.message || 'An error occurred'}`
+            }));
+            break;
+
           case 'agent_stopped':
+            if (streamBufferRef.current.content || streamData.content) {
+              const partial = streamBufferRef.current.content || streamData.content;
+              setMessages(prev => [
+                ...prev,
+                {
+                  id: `msg_${Date.now()}_stopped`,
+                  role: 'assistant',
+                  content: partial,
+                  timestamp: Date.now()
+                }
+              ]);
+            }
+            streamBufferRef.current = { content: '', reasoning: '' };
+            setStreamData({ content: '', reasoning: '', toolCalls: [] });
             setAgentStatus('stopped');
             setPendingPrompt(null);
+            setAgentProgress(prev => ({
+              ...prev,
+              isBusy: false,
+              phase: 'stopped',
+              percent: 0,
+              stepText: 'Stopped'
+            }));
             break;
 
           case 'workspace_updated':
@@ -528,6 +691,15 @@ export function AppProvider({ children }) {
       return;
     }
     setAgentStatus('streaming');
+    setAgentProgress({
+      isBusy: true,
+      phase: 'reading_context',
+      percent: 15,
+      stepText: 'Receiving prompt & analyzing context...',
+      startedAt: Date.now(),
+      toolName: '',
+      iteration: 1
+    });
     wsRef.current.send(JSON.stringify({
       type: 'start_task',
       payload: {
@@ -544,6 +716,14 @@ export function AppProvider({ children }) {
   const continueRun = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     setAgentStatus('streaming');
+    setAgentProgress(prev => ({
+      ...prev,
+      isBusy: true,
+      phase: 'thinking',
+      percent: Math.max(prev.percent || 0, 30),
+      stepText: 'Continuing task...',
+      startedAt: Date.now()
+    }));
     wsRef.current.send(JSON.stringify({ type: 'continue_run', payload: {} }));
   };
 
@@ -564,6 +744,13 @@ export function AppProvider({ children }) {
   const respondInteractivePrompt = (actionId, response) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     setPendingPrompt(null);
+    setAgentProgress(prev => ({
+      ...prev,
+      isBusy: true,
+      phase: 'tool_executing',
+      stepText: 'Processing your choice & continuing...',
+      startedAt: prev.startedAt || Date.now()
+    }));
     wsRef.current.send(JSON.stringify({
       type: 'respond_interactive_prompt',
       payload: { actionId, response }
@@ -574,6 +761,13 @@ export function AppProvider({ children }) {
     if (!wsRef.current) return;
     wsRef.current.send(JSON.stringify({ type: 'stop_agent' }));
     setAgentStatus('stopped');
+    setAgentProgress(prev => ({
+      ...prev,
+      isBusy: false,
+      phase: 'stopped',
+      percent: 0,
+      stepText: 'Stopped'
+    }));
   };
 
   const clearChat = () => {
@@ -584,6 +778,15 @@ export function AppProvider({ children }) {
     setActivePlan(null);
     setActiveCanvas(null);
     setPendingPrompt(null);
+    setAgentProgress({
+      isBusy: false,
+      phase: 'idle',
+      percent: 0,
+      stepText: '',
+      startedAt: null,
+      toolName: '',
+      iteration: 1
+    });
   };
 
   const switchChat = (chatId) => {
@@ -758,6 +961,16 @@ export function AppProvider({ children }) {
     }
   };
 
+  const clearUpdateCache = async () => {
+    try {
+      const res = await api.cleanUpdateCache();
+      return res;
+    } catch (err) {
+      console.warn('Failed to clear update cache:', err);
+      return { success: false, error: err.message };
+    }
+  };
+
   const saveSettings = async ({ apiKey, selectedModel, autoApprove: autoApp, updateRepo: repo, autoCheckUpdates: autoCheck, selectedTheme }) => {
     try {
       const themeToSave = selectedTheme || theme;
@@ -800,11 +1013,18 @@ export function AppProvider({ children }) {
     setTheme,
     saveSettings,
 
-    // Resizable layout
+    // Resizable & Customizable Layout
     panelSizes,
+    panelOrder,
+    panelVisibility,
     resizePanel,
     resetPanel,
     resetAllPanels,
+    togglePanelVisibility,
+    setPanelVisibility,
+    movePanel,
+    reorderPanels,
+    resetLayout,
 
     // Workspace & Editor
     workspaceRoot,
@@ -832,6 +1052,8 @@ export function AppProvider({ children }) {
     setReasoningEffort: handleSetReasoningEffort,
     messages,
     agentStatus,
+    agentProgress,
+    setAgentProgress,
     streamData,
     pendingPrompt,
     agentStepLog,
@@ -880,7 +1102,8 @@ export function AppProvider({ children }) {
     setAutoCheckUpdates,
     checkUpdates,
     startDownloadUpdate,
-    applyUpdate
+    applyUpdate,
+    clearUpdateCache
   };
 
   return (

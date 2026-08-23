@@ -22,12 +22,32 @@ import ToolCallCard from './ToolCallCard';
 import { useApp } from '../../context/AppContext';
 import MediaLightboxModal from '../Modals/MediaLightboxModal';
 
+function SystemNoticeCard({ message }) {
+  const { continueRun, agentStatus } = useApp();
+  return (
+    <div className="my-3 p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-xl text-amber-200 text-xs flex items-start gap-2.5 shadow-lg select-text selectable-text">
+      <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+      <div className="flex-1 space-y-2">
+        <div className="leading-relaxed whitespace-pre-wrap font-sans select-text">{message.content}</div>
+        {message.canContinue && (
+          <button
+            onClick={continueRun}
+            disabled={agentStatus === 'streaming' || agentStatus === 'executing_tool'}
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-semibold rounded-lg transition-colors select-none"
+          >
+            Continue task
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MessageItemComponent({ message }) {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedResponse, setCopiedResponse] = useState(false);
   const [isReasoningOpen, setIsReasoningOpen] = useState(false);
   const [lightboxMedia, setLightboxMedia] = useState(null);
-  const { continueRun, agentStatus } = useApp();
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -171,23 +191,7 @@ function MessageItemComponent({ message }) {
 
   // Safety-limit pause
   if (message.role === 'system_notice') {
-    return (
-      <div className="my-3 p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-xl text-amber-200 text-xs flex items-start gap-2.5 shadow-lg select-text selectable-text">
-        <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-        <div className="flex-1 space-y-2">
-          <div className="leading-relaxed whitespace-pre-wrap font-sans select-text">{message.content}</div>
-          {message.canContinue && (
-            <button
-              onClick={continueRun}
-              disabled={agentStatus === 'streaming' || agentStatus === 'executing_tool'}
-              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-semibold rounded-lg transition-colors select-none"
-            >
-              Continue task
-            </button>
-          )}
-        </div>
-      </div>
-    );
+    return <SystemNoticeCard message={message} />;
   }
 
   // Tool Result

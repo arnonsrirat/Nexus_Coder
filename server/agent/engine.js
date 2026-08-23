@@ -1,3 +1,4 @@
+import os from 'os';
 import { toolDefinitions, ToolExecutor } from './tools.js';
 import { generateRepoMap } from './repoMap.js';
 import { OpenRouterClient } from './openrouter.js';
@@ -44,6 +45,33 @@ Your goal is to answer questions, explain code, debug issues conceptually, and t
 4. Format your explanations beautifully with clear headings, callouts, generous paragraph spacing, and syntax-highlighted code snippets.
 `;
 
+export const SYSTEM_PROMPT_SYSTEM = `You are NexusCoder in **System Agent Mode** (Host OS, Hardware & Machine Management Specialist).
+Your mission is to inspect, diagnose, troubleshoot, maintain, and manage the user's host computer and operating system directly. You are NOT confined to any project directory.
+
+### Core Capabilities & Native Tools:
+1. **Host System & Hardware Inspection ('get_system_info')**:
+   - Inspect OS version, CPU cores & real-time load, RAM utilization (Total, Used, Free), Disk drive partitions (C:, D:, etc.) with exact used/free space, and network adapters.
+2. **Process Management & Diagnostics ('list_processes', 'kill_process')**:
+   - Inspect running processes with PID, Process Name, Memory (MB), CPU usage.
+   - Find runaway, high-memory, high-CPU, or unresponsive processes.
+   - Terminate hung or problematic processes safely when asked.
+3. **Network & Port Diagnostics ('get_network_info')**:
+   - Inspect active listening ports (e.g. check what process is using port 3000, 8080, 5000, etc.) and view network adapters.
+4. **Machine-Wide Filesystem Management ('read_file', 'write_file', 'apply_diff', 'list_dir', 'search_code')**:
+   - Access, read, create, or edit files across any path or drive on the host machine (e.g. C:\\, D:\\, %USERPROFILE%, %TEMP%, AppData, system logs, config files).
+5. **System Terminal Execution ('run_command')**:
+   - Execute PowerShell, CMD, or Bash commands with optional 'cwd' parameter.
+   - Run system diagnostics, check disk health, clean temporary files, manage Windows services, install/update packages (winget, choco, npm, pip, git), and automate repetitive tasks.
+6. **Visual Summaries & Checklists ('update_plan', 'update_canvas')**:
+   - Use 'update_plan' for multi-step diagnostic or maintenance tasks.
+   - Use 'update_canvas' to present clean system health dashboards, storage breakdown tables, or diagnostic reports.
+
+### Safety & Guidelines:
+- Before executing destructive commands (e.g. deleting files outside temp folders, terminating critical system processes, modifying system registry), explain what will happen and confirm safety with the user.
+- Respond in the language used by the user (Thai / English).
+- Format all outputs with clear Markdown headers, tables, callouts, and clean code blocks.
+`;
+
 // Network hiccups, rate limits and gateway errors are worth retrying;
 // a bad request or a rejected API key is not.
 function isRetryableError(err) {
@@ -88,7 +116,7 @@ export class AgentEngine {
     this.toolExecutor = new ToolExecutor(null);
     this.workspaceRoot = null;
     this.model = 'anthropic/claude-3.7-sonnet';
-    this.mode = 'agent'; // 'agent' | 'plan' | 'ask'
+    this.mode = 'agent'; // 'agent' | 'plan' | 'ask' | 'system'
     this.reasoningEffort = 'medium'; // 'high' | 'medium' | 'low' | 'off'
     this.autoApprove = false;
     // Long tasks legitimately need many tool round-trips. The old limit of 15
@@ -174,7 +202,7 @@ export class AgentEngine {
   }
 
   setMode(mode) {
-    if (['agent', 'plan', 'ask'].includes(mode)) {
+    if (['agent', 'plan', 'ask', 'system'].includes(mode)) {
       this.mode = mode;
       this.emit('mode_updated', { mode });
     }
@@ -232,6 +260,7 @@ export class AgentEngine {
     this.isRunning = false;
     this.isPausedForInput = false;
     this.pendingAction = null;
+    this.emit('agent_progress', { phase: 'stopped', percent: 0, step: 'Agent stopped by user.' });
     this.emit('agent_stopped', { message: 'Agent stopped by user.' });
   }
 
@@ -246,6 +275,11 @@ export class AgentEngine {
         ['read_file', 'list_dir', 'search_code', 'update_plan', 'update_canvas', 'ask_user'].includes(t.function.name)
       );
     }
+    if (this.mode === 'system') {
+      return toolDefinitions.filter(t => 
+        ['get_system_info', 'list_processes', 'kill_process', 'get_network_info', 'run_command', 'read_file', 'write_file', 'apply_diff', 'list_dir', 'search_code', 'update_plan', 'update_canvas', 'ask_user'].includes(t.function.name)
+      );
+    }
     return toolDefinitions; // all tools for agent mode
   }
 
@@ -255,6 +289,8 @@ export class AgentEngine {
         return SYSTEM_PROMPT_PLAN;
       case 'ask':
         return SYSTEM_PROMPT_ASK;
+      case 'system':
+        return SYSTEM_PROMPT_SYSTEM;
       default:
         return SYSTEM_PROMPT_AGENT;
     }
@@ -264,22 +300,42 @@ export class AgentEngine {
     if (this.isRunning) {
       throw new Error('Agent is already running. Please stop or wait.');
     }
-    if (!this.workspaceRoot) {
-      throw new Error('Please select a project folder first.');
-    }
-
     if (options.mode) this.mode = options.mode;
     if (options.reasoningEffort) this.reasoningEffort = options.reasoningEffort;
+
+    if (!this.workspaceRoot && this.mode !== 'system') {
+      throw new Error('Please select a project folder first.');
+    }
 
     this.isRunning = true;
     this.abortController = new AbortController();
 
-    // Prepare system prompt with workspace repo map
-    const repoMap = generateRepoMap(this.workspaceRoot);
+    this.emit('agent_progress', {
+      phase: 'reading_context',
+      percent: 10,
+      step: this.mode === 'system' ? 'Loading system overview & context...' : 'Loading workspace context & pinned files...',
+      iteration: 1
+    });
+
+    // Prepare system prompt with workspace repo map or host system overview
+    let contextAttachment = '';
+    if (this.mode === 'system') {
+      try {
+        const sys = await this.toolExecutor.getSystemInfo();
+        const diskStr = (sys.disks || []).map(d => `${d.drive || d.mount} (${d.usedPercent} used, ${d.freeGB} free / ${d.totalGB})`).join(' | ');
+        contextAttachment = `\n\n### Host System Environment:\n- OS: ${sys.os.platform} (${sys.os.release}, ${sys.os.arch}) | Hostname: ${sys.os.hostname} | User: ${sys.os.username}\n- CPU: ${sys.cpu.model} (${sys.cpu.cores} cores, usage ~${sys.cpu.usageApprox})\n- RAM: Total ${sys.memory.totalGB} | Used ${sys.memory.usedGB} (${sys.memory.usedPercent}) | Free ${sys.memory.freeGB}\n- Storage: ${diskStr || 'N/A'}\n- System Uptime: ${sys.os.uptime}`;
+      } catch (e) {
+        contextAttachment = `\n\n### Host System: ${os.platform()} ${os.arch()}`;
+      }
+    } else if (this.workspaceRoot) {
+      const repoMap = generateRepoMap(this.workspaceRoot);
+      contextAttachment = `\n\n### Current Project Structure:\n${repoMap}`;
+    }
+
     const modePrompt = this.getSystemPromptForMode();
     const systemMessage = {
       role: 'system',
-      content: `${modePrompt}\n\n### Current Project Structure:\n${repoMap}`
+      content: `${modePrompt}${contextAttachment}`
     };
 
     // Prepare user message
@@ -349,6 +405,13 @@ export class AgentEngine {
     this.messages.push({ role: 'user', content: messageContentForLLM });
     this.addUiMessage(userMsgObj);
     this.saveCurrentSession();
+
+    this.emit('agent_progress', {
+      phase: 'analyzing_prompt',
+      percent: 20,
+      step: 'Connecting to AI model & sending prompt...',
+      iteration: 1
+    });
 
     this.runLoop();
   }
@@ -439,6 +502,15 @@ export class AgentEngine {
         const assistantMsgId = `msg_${Date.now()}_assistant_${iteration}`;
         let currentAssistantText = '';
         let currentReasoningText = '';
+        let hasEmittedGeneratingProgress = false;
+        let hasEmittedReasoningProgress = false;
+
+        this.emit('agent_progress', {
+          phase: 'thinking',
+          percent: Math.min(30 + (iteration - 1) * 15, 80),
+          step: iteration === 1 ? 'NexusCoder is thinking & analyzing...' : `Step ${iteration}: Reasoning about next actions...`,
+          iteration
+        });
 
         this.emit('stream_start', { messageId: assistantMsgId });
 
@@ -456,10 +528,28 @@ export class AgentEngine {
               signal: this.abortController?.signal,
               onChunk: (chunk, fullText) => {
                 currentAssistantText = fullText;
+                if (!hasEmittedGeneratingProgress) {
+                  hasEmittedGeneratingProgress = true;
+                  this.emit('agent_progress', {
+                    phase: 'generating',
+                    percent: Math.min(70 + (iteration - 1) * 5, 90),
+                    step: 'Generating response & code...',
+                    iteration
+                  });
+                }
                 this.emit('stream_chunk', { messageId: assistantMsgId, content: fullText });
               },
               onReasoning: (chunk, fullReasoning) => {
                 currentReasoningText = fullReasoning;
+                if (!hasEmittedReasoningProgress) {
+                  hasEmittedReasoningProgress = true;
+                  this.emit('agent_progress', {
+                    phase: 'reasoning',
+                    percent: Math.min(45 + (iteration - 1) * 10, 85),
+                    step: 'Deep Thinking & Reasoning...',
+                    iteration
+                  });
+                }
                 this.emit('stream_reasoning', { messageId: assistantMsgId, reasoning: fullReasoning });
               }
             });
@@ -489,6 +579,24 @@ export class AgentEngine {
         }
 
         if (lastError) {
+          const partialContent = (currentAssistantText || '').trim();
+          const partialReasoning = (currentReasoningText || '').trim();
+          if (partialContent || partialReasoning) {
+            this.emit('stream_end', {
+              messageId: assistantMsgId,
+              content: partialContent,
+              reasoning: partialReasoning,
+              toolCalls: []
+            });
+            this.uiMessages.push({
+              id: assistantMsgId,
+              role: 'assistant',
+              content: partialContent,
+              reasoning: partialReasoning,
+              toolCalls: [],
+              timestamp: Date.now()
+            });
+          }
           this.emit('error', {
             message: `${lastError.message} (gave up after ${this.maxStreamRetries} retries)`
           });
@@ -497,13 +605,17 @@ export class AgentEngine {
           return;
         }
 
+        const finalContent = response?.content || currentAssistantText || '';
+        const finalReasoning = response?.reasoning || currentReasoningText || '';
+        const finalToolCalls = response?.toolCalls || [];
+
         const assistantObj = {
           role: 'assistant',
-          content: response.content || ''
+          content: finalContent
         };
 
-        if (response.toolCalls && response.toolCalls.length > 0) {
-          assistantObj.tool_calls = response.toolCalls.map(tc => ({
+        if (finalToolCalls.length > 0) {
+          assistantObj.tool_calls = finalToolCalls.map(tc => ({
             id: tc.id,
             type: 'function',
             function: {
@@ -517,26 +629,34 @@ export class AgentEngine {
 
         this.emit('stream_end', {
           messageId: assistantMsgId,
-          content: response.content,
-          reasoning: response.reasoning,
-          toolCalls: response.toolCalls
+          content: finalContent,
+          reasoning: finalReasoning,
+          toolCalls: finalToolCalls
         });
 
         // Mirror what the client appends on stream_end so a restored session
         // renders identically to a live one.
-        this.uiMessages.push({
-          id: assistantMsgId,
-          role: 'assistant',
-          content: response.content,
-          reasoning: response.reasoning,
-          toolCalls: response.toolCalls,
-          timestamp: Date.now()
-        });
+        if (finalContent || finalReasoning || finalToolCalls.length > 0) {
+          this.uiMessages.push({
+            id: assistantMsgId,
+            role: 'assistant',
+            content: finalContent,
+            reasoning: finalReasoning,
+            toolCalls: finalToolCalls,
+            timestamp: Date.now()
+          });
+        }
 
         this.saveCurrentSession();
 
         if (!response.toolCalls || response.toolCalls.length === 0) {
           this.isRunning = false;
+          this.emit('agent_progress', {
+            phase: 'completed',
+            percent: 100,
+            step: 'Task completed.',
+            iteration
+          });
           this.emit('agent_completed', {
             message: 'Task completed.',
             totalIterations: iteration
@@ -550,6 +670,14 @@ export class AgentEngine {
         for (const tc of response.toolCalls) {
           const toolName = tc.name;
           const toolArgs = tc.arguments;
+
+          this.emit('agent_progress', {
+            phase: 'tool_executing',
+            percent: 85,
+            step: `Executing action: ${toolName}...`,
+            toolName,
+            iteration
+          });
 
           this.emit('tool_call_start', {
             toolCallId: tc.id,
@@ -602,6 +730,14 @@ export class AgentEngine {
             toolArgs,
             (status) => this.handleToolStatus({ toolCallId: tc.id, ...status })
           );
+
+          this.emit('agent_progress', {
+            phase: 'tool_completed',
+            percent: 90,
+            step: `Completed ${toolName}. Analyzing results...`,
+            toolName,
+            iteration
+          });
 
           this.emit('tool_call_result', {
             toolCallId: tc.id,

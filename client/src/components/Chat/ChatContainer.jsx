@@ -4,6 +4,7 @@ import MessageItem from './MessageItem';
 import InteractivePrompt from './InteractivePrompt';
 import ModeSelector from './ModeSelector';
 import MediaLightboxModal from '../Modals/MediaLightboxModal';
+import AgentThinkingCard from './AgentThinkingCard';
 import { 
   Send, 
   Square, 
@@ -21,13 +22,16 @@ import {
   Film,
   X,
   Maximize2,
-  Plus
+  Plus,
+  PanelRightClose,
+  Monitor
 } from 'lucide-react';
 
 export default function ChatContainer() {
   const {
     messages,
     agentStatus,
+    agentProgress,
     agentMode,
     streamData,
     pendingPrompt,
@@ -39,22 +43,31 @@ export default function ChatContainer() {
     createNewChat,
     workspaceRoot,
     pinnedContextFiles,
-    togglePinContextFile
+    togglePinContextFile,
+    togglePanelVisibility
   } = useApp();
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [attachedMedia, setAttachedMedia] = useState([]);
   const [lightboxMedia, setLightboxMedia] = useState(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-
+  const messagesContainerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Auto scroll down
+  const isBusy = agentStatus === 'streaming' || agentStatus === 'executing_tool' || Boolean(agentProgress?.isBusy);
+
+  // Non-blocking auto scroll down (instant during streaming to prevent layout lag, smooth on completion)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamData, pendingPrompt]);
+    if (messagesContainerRef.current) {
+      if (isBusy) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      } else {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }, [messages, streamData, pendingPrompt, isBusy]);
 
   // Helper to read files as data URLs and append to attachedMedia
   const handleFiles = useCallback((files) => {
@@ -189,14 +202,23 @@ export default function ChatContainer() {
     e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
   };
 
-  const isBusy = agentStatus === 'streaming' || agentStatus === 'executing_tool';
-  const canSend = (inputPrompt.trim().length > 0 || attachedMedia.length > 0) && !!workspaceRoot && !isBusy;
+  const isSystemMode = agentMode === 'system';
+  const canSend = (inputPrompt.trim().length > 0 || attachedMedia.length > 0) && (isSystemMode || !!workspaceRoot) && !isBusy;
 
-  const quickPrompts = [
+  const projectQuickPrompts = [
     { label: 'Explore & explain project', icon: <Lightbulb className="w-3 h-3 text-amber-400" />, prompt: 'Please explore this project workspace, explain its structure and main features.' },
     { label: 'Find & fix bugs', icon: <Bug className="w-3 h-3 text-rose-400" />, prompt: 'Check all files in the project for potential bugs, syntax issues, or missing dependencies and propose fixes.' },
     { label: 'Add automated tests', icon: <Code2 className="w-3 h-3 text-cyan-400" />, prompt: 'Write comprehensive unit tests for the core logic in this project.' }
   ];
+
+  const systemQuickPrompts = [
+    { label: 'Check System Specs & Health', icon: <Monitor className="w-3 h-3 text-amber-400" />, prompt: 'Please check my machine specs, real-time CPU load, RAM utilization, and storage space on all drives.' },
+    { label: 'Inspect Running Processes', icon: <Zap className="w-3 h-3 text-cyan-400" />, prompt: 'List active processes and identify any high-CPU, high-memory, or unresponsive applications.' },
+    { label: 'Scan Open Ports & Services', icon: <Code2 className="w-3 h-3 text-indigo-400" />, prompt: 'Check listening network ports to see which services and processes are currently active.' },
+    { label: 'Clean Temp Files & Storage', icon: <Bug className="w-3 h-3 text-rose-400" />, prompt: 'Scan temporary file directories, caches, and storage waste to recommend safe cleanup options.' }
+  ];
+
+  const quickPrompts = isSystemMode ? systemQuickPrompts : projectQuickPrompts;
 
   return (
     <div 
@@ -230,21 +252,34 @@ export default function ChatContainer() {
               <Trash2 className="w-3 h-3" />
             </button>
           )}
+
+          <button
+            onClick={() => togglePanelVisibility('chat')}
+            className="p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors ml-0.5"
+            title="Collapse Chat Panel (พับเก็บแผงแชต)"
+          >
+            <PanelRightClose className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
       {/* Messages Stream (Supports text selection everywhere) */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 select-text selectable-text">
-        {messages.length === 0 && !streamData.content && !streamData.reasoning && (
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-4 select-text selectable-text"
+      >
+        {messages.length === 0 && !streamData.content && !streamData.reasoning && !isBusy && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 max-w-lg mx-auto select-none">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-xl shadow-indigo-500/20 mb-4 glow-box">
-              <Sparkles className="w-6 h-6" />
+            <div className={`w-12 h-12 rounded-2xl ${isSystemMode ? 'bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-600 shadow-amber-500/20' : 'bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 shadow-indigo-500/20'} flex items-center justify-center text-white shadow-xl mb-4 glow-box`}>
+              {isSystemMode ? <Monitor className="w-6 h-6" /> : <Sparkles className="w-6 h-6" />}
             </div>
             <h2 className="text-lg font-bold text-white mb-2">
-              Welcome to NexusCoder
+              {isSystemMode ? 'System Agent & Host Assistant' : 'Welcome to NexusCoder'}
             </h2>
             <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-              Your autonomous AI coding agent powered by OpenRouter. Supports images, videos, clipboard pasting (Ctrl+V), surgical code diffs, command execution, and deep thinking.
+              {isSystemMode 
+                ? 'Autonomous machine & OS specialist. Inspect CPU/RAM, check disk partitions, analyze running processes, inspect listening ports, clean caches, and run system management tasks directly on your computer.'
+                : 'Your autonomous AI coding agent powered by OpenRouter. Supports images, videos, clipboard pasting (Ctrl+V), surgical code diffs, command execution, and deep thinking.'}
             </p>
 
             <div className="w-full space-y-2 text-left">
@@ -272,14 +307,18 @@ export default function ChatContainer() {
           <MessageItem key={msg.id} message={msg} />
         ))}
 
-        {/* Real-time Streaming Assistant Chunk */}
-        {(streamData.content || streamData.reasoning) && (
+        {/* Real-time Thinking & Progress Card */}
+        {isBusy && (
+          <AgentThinkingCard />
+        )}
+
+        {/* Real-time Streaming Assistant Chunk (When text begins streaming) */}
+        {streamData.content && (
           <MessageItem
             message={{
               id: 'streaming_current',
               role: 'assistant',
-              content: streamData.content,
-              reasoning: streamData.reasoning
+              content: streamData.content
             }}
           />
         )}
@@ -287,14 +326,6 @@ export default function ChatContainer() {
         {/* Interactive Decision / Choice Prompt (Ask User) */}
         {pendingPrompt && (
           <InteractivePrompt prompt={pendingPrompt} />
-        )}
-
-        {/* Agent Step Status Bar */}
-        {agentStepLog && isBusy && (
-          <div className="flex items-center gap-2 p-2 px-3 bg-cyan-950/30 border border-cyan-500/30 rounded-lg text-cyan-300 text-xs animate-pulse select-none">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span className="font-mono">{agentStepLog}</span>
-          </div>
         )}
 
         <div ref={messagesEndRef} />
@@ -432,7 +463,9 @@ export default function ChatContainer() {
               onChange={handleTextareaInput}
               onKeyDown={handleKeyDown}
               placeholder={
-                !workspaceRoot
+                isSystemMode
+                  ? "Ask System Agent to inspect CPU/RAM, check disks, list processes, scan ports, clean temp files, or manage OS..."
+                  : !workspaceRoot
                   ? "Please select a project folder first..."
                   : agentMode === 'plan'
                   ? "Ask NexusCoder to plan architecture, outline steps, or design features..."
@@ -440,7 +473,7 @@ export default function ChatContainer() {
                   ? "Ask any question about code, frameworks, bugs, or architecture..."
                   : "Ask NexusCoder to build, fix, refactor, or attach image/video... (Ctrl+V to paste image, Enter to send)"
               }
-              disabled={!workspaceRoot}
+              disabled={!isSystemMode && !workspaceRoot}
               className="w-full p-3.5 pl-10 pr-24 bg-transparent text-slate-200 text-sm focus:outline-none resize-none max-h-48 placeholder-slate-500 leading-relaxed font-sans select-text"
             />
 
@@ -449,7 +482,7 @@ export default function ChatContainer() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!workspaceRoot || isBusy}
+                disabled={(!isSystemMode && !workspaceRoot) || isBusy}
                 className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800/80 disabled:opacity-40 transition-all"
                 title="Attach Image or Video (or press Ctrl+V to paste from clipboard)"
               >

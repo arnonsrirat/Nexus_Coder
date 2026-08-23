@@ -266,3 +266,32 @@
 .spin-slow {
   animation: spin-slow 8s linear infinite;
 }
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.progress-shimmer {
+  animation: shimmer 2.2s infinite ease-in-out;
+}
+
+@keyframes pulse-radar {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.2); opacity: 0.15; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.radar-ring {
+  animation: pulse-radar 2.5s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@keyframes typing-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typing-cursor {
+  animation: typing-cursor 0.9s infinite;
+}
+

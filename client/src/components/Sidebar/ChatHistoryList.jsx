@@ -189,6 +189,10 @@ export default function ChatHistoryList() {
                           <span className="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/20 font-mono">
                             Ask
                           </span>
+                        ) : chat.mode === 'system' ? (
+                          <span className="px-1.5 py-0.2 rounded bg-amber-950/80 text-amber-300 border border-amber-500/20 font-mono">
+                            System
+                          </span>
                         ) : null}
 
                         {chat.messageCount > 0 && (

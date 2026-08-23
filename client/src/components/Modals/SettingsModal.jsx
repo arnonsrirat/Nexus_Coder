@@ -9,10 +9,12 @@ import {
   Eye, 
   EyeOff, 
   ExternalLink, 
-  Check, 
+  Check,
   Search,
+  RotateCw,
   Sparkles,
-  Palette
+  Palette,
+  Trash2
 } from 'lucide-react';
 
 export default function SettingsModal() {
@@ -30,6 +32,7 @@ export default function SettingsModal() {
     updateRepo,
     autoCheckUpdates,
     checkUpdates,
+    clearUpdateCache,
     setIsUpdateModalOpen,
     theme,
     setTheme
@@ -38,6 +41,8 @@ export default function SettingsModal() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [selectedModel, setSelectedModel] = useState(model);
   const [autoApp, setAutoApp] = useState(autoApprove);
+  const [isCleaningCache, setIsCleaningCache] = useState(false);
+  const [cleanMessage, setCleanMessage] = useState(null);
   const [showKey, setShowKey] = useState(false);
   const [searchModel, setSearchModel] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -372,8 +377,31 @@ export default function SettingsModal() {
                 <span className="text-[11px]">Automatically check for updates on startup</span>
               </label>
 
-              <span className="text-[10px] text-slate-500 font-mono">Channel: Stable</span>
+              <button
+                type="button"
+                disabled={isCleaningCache}
+                onClick={async () => {
+                  setIsCleaningCache(true);
+                  const res = await clearUpdateCache();
+                  setIsCleaningCache(false);
+                  const freedMB = ((res?.freedBytes || 0) / (1024 * 1024)).toFixed(1);
+                  setCleanMessage(`Cleaned ${freedMB} MB of update cache.`);
+                  setTimeout(() => setCleanMessage(null), 3500);
+                }}
+                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg text-[11px] text-slate-400 hover:text-rose-300 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                title="Clean old installer files in temp directory to free disk space"
+              >
+                <Trash2 className="w-3 h-3 text-slate-500" />
+                <span>{isCleaningCache ? 'Cleaning...' : 'Clean Update Cache'}</span>
+              </button>
             </div>
+
+            {cleanMessage && (
+              <div className="p-2 bg-emerald-950/40 border border-emerald-500/40 rounded-lg text-emerald-300 text-[11px] flex items-center gap-1.5 animate-in fade-in">
+                <Check className="w-3.5 h-3.5" />
+                <span>{cleanMessage}</span>
+              </div>
+            )}
           </div>
 
           {/* Actions */}

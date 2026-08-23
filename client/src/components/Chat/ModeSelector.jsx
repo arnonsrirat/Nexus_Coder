@@ -4,6 +4,7 @@ import {
   Zap, 
   ListChecks, 
   MessageSquare, 
+  Monitor,
   Brain, 
   Layout, 
   Sparkles,
@@ -27,7 +28,7 @@ export default function ModeSelector() {
       id: 'agent',
       label: 'Agent',
       icon: <Zap className="w-3.5 h-3.5 text-cyan-400" />,
-      desc: 'Autonomous coding & execution'
+      desc: 'Autonomous coding & execution in workspace'
     },
     {
       id: 'plan',
@@ -40,6 +41,12 @@ export default function ModeSelector() {
       label: 'Ask',
       icon: <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />,
       desc: 'Code explanation & consultation'
+    },
+    {
+      id: 'system',
+      label: 'System',
+      icon: <Monitor className="w-3.5 h-3.5 text-amber-400" />,
+      desc: 'Machine inspection & OS management (CPU, RAM, Disks, Processes, Ports)'
     }
   ];
 

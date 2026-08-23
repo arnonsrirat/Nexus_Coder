@@ -157,3 +157,16 @@ export async function applyUpdate() {
   return res.json();
 }
 
+export async function cleanUpdateCache() {
+  const res = await fetch(`${API_BASE}/updater/clean-cache`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to clean update cache');
+  }
+  return res.json();
+}
+
+

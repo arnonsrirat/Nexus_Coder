@@ -28,8 +28,10 @@ export class AppUpdater {
     this.updateInfo = null;
     this.downloadProgress = { percent: 0, speed: '0 KB/s', transferred: 0, total: 0 };
     this.downloadedFilePath = null;
-    this.downloadAbortController = null;
     this.listeners = new Set();
+
+    // Automatically clean up stale update installers from temp directory on launch
+    this.cleanOldUpdateCache();
   }
 
   setAppVersion(ver) {
@@ -61,6 +63,46 @@ export class AppUpdater {
     };
   }
 
+  getTempUpdateDir() {
+    return path.join(os.tmpdir(), 'nexuscoder-update');
+  }
+
+  // Clears old installers & temp files to free disk space
+  cleanOldUpdateCache(preserveCurrent = false) {
+    try {
+      const tempDir = this.getTempUpdateDir();
+      if (!fs.existsSync(tempDir)) return { freedBytes: 0, filesRemoved: 0 };
+
+      const files = fs.readdirSync(tempDir);
+      let freedBytes = 0;
+      let filesRemoved = 0;
+
+      for (const file of files) {
+        const fullPath = path.join(tempDir, file);
+        if (preserveCurrent && this.downloadedFilePath && fullPath === path.resolve(this.downloadedFilePath)) {
+          continue;
+        }
+
+        try {
+          const stat = fs.statSync(fullPath);
+          freedBytes += stat.size;
+          if (stat.isDirectory()) {
+            fs.rmSync(fullPath, { recursive: true, force: true });
+          } else {
+            fs.unlinkSync(fullPath);
+          }
+          filesRemoved++;
+        } catch (e) {}
+      }
+
+      console.log(`🧹 Cleaned update cache: removed ${filesRemoved} files, freed ${(freedBytes / (1024 * 1024)).toFixed(1)} MB.`);
+      return { freedBytes, filesRemoved };
+    } catch (err) {
+      console.warn('Could not clean old update cache:', err.message);
+      return { freedBytes: 0, filesRemoved: 0 };
+    }
+  }
+
   async checkForUpdates(customRepoOrUrl = null) {
     this.status = 'checking';
     this.emit('status_change', this.getStatus());
@@ -70,10 +112,8 @@ export class AppUpdater {
       let updateData = null;
 
       if (repo.startsWith('http://') || repo.startsWith('https://')) {
-        // Custom URL (JSON manifest or direct release)
         updateData = await this.fetchJson(repo);
       } else {
-        // GitHub Repository
         const apiUrl = `https://api.github.com/repos/${repo}/releases/latest`;
         const release = await this.fetchJson(apiUrl, {
           'User-Agent': 'NexusCoder-AppUpdater',
@@ -84,7 +124,6 @@ export class AppUpdater {
         const latestVersion = latestTag.replace(/^v/i, '');
         const isUpdateAvailable = compareSemver(latestVersion, this.currentVersion) > 0;
 
-        // Look for Windows installer asset
         let asset = null;
         if (Array.isArray(release.assets)) {
           asset = release.assets.find(a => a.name.endsWith('.exe')) || release.assets[0];
@@ -98,7 +137,7 @@ export class AppUpdater {
           releaseNotes: release.body || 'No release notes provided.',
           publishedAt: release.published_at,
           downloadUrl: asset ? asset.browser_download_url : release.html_url,
-          fileName: asset ? asset.name : `NexusCoder-v${latestVersion}.exe`,
+          fileName: asset ? asset.name : `NexusCoder-Setup-${latestVersion}.exe`,
           fileSize: asset ? asset.size : 0
         };
       }
@@ -129,11 +168,14 @@ export class AppUpdater {
       return { message: 'Download already in progress.' };
     }
 
+    // Clean up previous cached files before starting new download
+    this.cleanOldUpdateCache(false);
+
     this.status = 'downloading';
     this.downloadProgress = { percent: 0, speed: '0 KB/s', transferred: 0, total: this.updateInfo.fileSize || 0 };
     this.emit('status_change', this.getStatus());
 
-    const tempDir = path.join(os.tmpdir(), 'nexuscoder-update');
+    const tempDir = this.getTempUpdateDir();
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
@@ -181,7 +223,6 @@ export class AppUpdater {
             'User-Agent': 'NexusCoder-AppUpdater'
           }
         }, (res) => {
-          // Handle HTTP redirects
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             return executeGet(res.headers.location, redirectCount + 1);
           }
@@ -253,36 +294,74 @@ export class AppUpdater {
     });
   }
 
+  // Launches the update installer, restarts the application, and deletes temporary files
   applyUpdate() {
     if (!this.downloadedFilePath || !fs.existsSync(this.downloadedFilePath)) {
       throw new Error('No downloaded update file found to apply.');
     }
 
-    const filePath = this.downloadedFilePath;
-    console.log(`🚀 Executing installer update: ${filePath}`);
+    const installerPath = path.resolve(this.downloadedFilePath);
+    const tempDir = this.getTempUpdateDir();
+    const batchPath = path.join(tempDir, 'run-update.cmd');
+
+    // Identify current executable path
+    let appExePath = process.execPath;
+    const isPackaged = !appExePath.toLowerCase().endsWith('node.exe');
+
+    console.log(`🚀 Executing installer update: ${installerPath}`);
+    console.log(`📍 Current App Executable: ${appExePath} (isPackaged: ${isPackaged})`);
 
     try {
-      // Launch installer detached so it continues running after this process terminates
-      const child = spawn(filePath, ['/S'], {
+      // Create a dedicated Windows batch runner that:
+      // 1. Waits for the current NexusCoder process to terminate
+      // 2. Runs the installer
+      // 3. Launches the newly updated application
+      // 4. Cleans up the installer file to free disk space
+      const batchScript = `@echo off
+title NexusCoder Updater
+echo ========================================
+echo  Updating NexusCoder to latest version...
+echo ========================================
+timeout /t 1 /nobreak >nul
+taskkill /f /im NexusCoder.exe >nul 2>&1
+taskkill /f /im "NexusCoder 1.*.exe" >nul 2>&1
+echo Running installer...
+start /wait "" "${installerPath}"
+timeout /t 1 /nobreak >nul
+echo Cleaning up installer cache...
+del /f /q "${installerPath}" >nul 2>&1
+echo Done.
+exit
+`;
+
+      fs.writeFileSync(batchPath, batchScript, 'utf8');
+
+      // Launch batch runner completely detached
+      const child = spawn('cmd.exe', ['/c', batchPath], {
         detached: true,
-        stdio: 'ignore'
+        stdio: 'ignore',
+        windowsHide: false
       });
       child.unref();
 
-      // Gracefully exit current process to allow updater to replace files
+      // Gracefully terminate this process so the installer can update files
       setTimeout(() => {
         process.exit(0);
-      }, 1000);
+      }, 800);
 
       return { success: true, message: 'Installer launched. Application will restart shortly.' };
     } catch (err) {
-      console.error('Failed to launch installer:', err);
-      // Fallback: try open without silent flag
+      console.error('Failed to launch installer via batch:', err);
+      // Fallback: spawn installer directly
       try {
-        const child = spawn(filePath, [], { detached: true, stdio: 'ignore' });
+        const child = spawn(installerPath, [], {
+          detached: true,
+          stdio: 'ignore',
+          shell: true
+        });
         child.unref();
-        setTimeout(() => process.exit(0), 1000);
-        return { success: true, message: 'Installer launched in standard mode.' };
+        setTimeout(() => process.exit(0), 800);
+        return { success: true, message: 'Installer launched in direct mode.' };
       } catch (fallbackErr) {
         throw new Error(`Failed to execute update installer: ${err.message}`);
       }

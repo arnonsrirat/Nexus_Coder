@@ -12,7 +12,11 @@ import {
   Terminal as TerminalIcon,
   HelpCircle,
   ShieldCheck,
-  Palette
+  Palette,
+  LayoutGrid,
+  RotateCcw,
+  Code2,
+  Bot
 } from 'lucide-react';
 
 export default function Header() {
@@ -33,8 +37,13 @@ export default function Header() {
     setIsUpdateModalOpen,
     updateInfo,
     theme,
-    setTheme
+    setTheme,
+    panelVisibility,
+    togglePanelVisibility,
+    resetLayout
   } = useApp();
+
+  const [isLayoutMenuOpen, setIsLayoutMenuOpen] = React.useState(false);
 
   const handleModelChange = (e) => {
     saveSettings({ selectedModel: e.target.value });
@@ -191,6 +200,105 @@ export default function Header() {
             </span>
           </button>
         )}
+
+        {/* Workspace Layout Customizer Menu */}
+        <div className="relative">
+          <button
+            onClick={() => setIsLayoutMenuOpen(!isLayoutMenuOpen)}
+            className={`p-2 rounded-lg border transition-all ${
+              isLayoutMenuOpen 
+                ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/50 shadow-md shadow-cyan-500/20' 
+                : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-cyan-300'
+            }`}
+            title="Customize Workspace Layout & Toggle Panels (พับ/ซ่อน/จัดตำแหน่งส่วนต่างๆ)"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+
+          {isLayoutMenuOpen && (
+            <>
+              <div 
+                className="fixed inset-0 z-40"
+                onClick={() => setIsLayoutMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-11 w-64 bg-slate-900/95 border border-slate-700/80 rounded-xl p-3 shadow-2xl z-50 backdrop-blur-xl space-y-2.5">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-800 text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                  <span>Workspace Layout</span>
+                  <button
+                    onClick={() => {
+                      resetLayout();
+                      setIsLayoutMenuOpen(false);
+                    }}
+                    className="text-cyan-400 hover:underline text-[10px] flex items-center gap-1 font-normal capitalize"
+                    title="Reset to default layout"
+                  >
+                    <RotateCcw className="w-2.5 h-2.5" /> Reset
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 text-xs">
+                  {/* Explorer Toggle */}
+                  <button
+                    onClick={() => togglePanelVisibility('sidebar')}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all ${
+                      panelVisibility.sidebar
+                        ? 'bg-cyan-950/50 text-cyan-200 border border-cyan-500/40'
+                        : 'bg-slate-950/40 text-slate-400 border border-slate-800/60 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Folder className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Files Explorer</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold">
+                      {panelVisibility.sidebar ? 'Visible' : 'Hidden'}
+                    </span>
+                  </button>
+
+                  {/* Editor Toggle */}
+                  <button
+                    onClick={() => togglePanelVisibility('editor')}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all ${
+                      panelVisibility.editor
+                        ? 'bg-blue-950/50 text-blue-200 border border-blue-500/40'
+                        : 'bg-slate-950/40 text-slate-400 border border-slate-800/60 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Code2 className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Code Editor</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold">
+                      {panelVisibility.editor ? 'Visible' : 'Hidden'}
+                    </span>
+                  </button>
+
+                  {/* AI Assistant Toggle */}
+                  <button
+                    onClick={() => togglePanelVisibility('chat')}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all ${
+                      panelVisibility.chat
+                        ? 'bg-purple-950/50 text-purple-200 border border-purple-500/40'
+                        : 'bg-slate-950/40 text-slate-400 border border-slate-800/60 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Bot className="w-3.5 h-3.5 text-purple-400" />
+                      <span>AI Assistant (Chat)</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold">
+                      {panelVisibility.chat ? 'Visible' : 'Hidden'}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="pt-1.5 border-t border-slate-800 text-[10px] text-slate-400 text-center select-none">
+                  💡 ลากหัว Panel เพื่อสลับตำแหน่ง ซ้าย/กลาง/ขวา ได้อิสระ
+                </div>
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Quick Theme Switcher Button */}
         <button

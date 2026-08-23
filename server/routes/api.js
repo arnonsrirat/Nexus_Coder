@@ -349,5 +349,17 @@ export function createApiRouter(agentEngine, configStore, appVersion = '0.0.0', 
     }
   });
 
+  router.post('/updater/clean-cache', (req, res) => {
+    if (!appUpdater) {
+      return res.status(500).json({ error: 'Updater service not initialized' });
+    }
+    try {
+      const result = appUpdater.cleanOldUpdateCache(false);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
