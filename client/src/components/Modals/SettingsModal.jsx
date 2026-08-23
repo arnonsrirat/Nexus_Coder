@@ -122,13 +122,15 @@ export default function SettingsModal() {
       <div className="w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
-              <Settings className="w-5 h-5" />
-            </div>
+          <div className="flex items-center gap-3">
+            <img 
+              src="/logo.png" 
+              alt="NexusCoder" 
+              className="w-9 h-9 rounded-xl object-cover border border-cyan-500/40 shadow-md shadow-cyan-500/20" 
+            />
             <div>
               <h2 className="text-base font-bold text-white">Settings & OpenRouter Configuration</h2>
-              <p className="text-xs text-slate-400">Configure your API credentials, default AI model, and agent behavior</p>
+              <p className="text-xs text-slate-400">NexusCoder Studio · by arnon_srirat</p>
             </div>
           </div>
           <button

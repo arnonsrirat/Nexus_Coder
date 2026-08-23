@@ -36,15 +36,17 @@ export default function UpdateModal() {
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-slate-950 via-indigo-950/30 to-slate-950">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white shadow-lg shadow-indigo-600/30">
-              <Sparkles className="w-5 h-5" />
-            </div>
+            <img 
+              src="/logo.png" 
+              alt="NexusCoder" 
+              className="w-10 h-10 rounded-xl object-cover border border-cyan-500/40 shadow-lg shadow-cyan-500/20" 
+            />
             <div>
               <h2 className="text-base font-bold text-white">
                 {isReady ? 'Update Ready to Install' : 'Software Update Available'}
               </h2>
               <p className="text-xs text-slate-400">
-                NexusCoder Studio
+                NexusCoder Studio · by arnon_srirat
               </p>
             </div>
           </div>

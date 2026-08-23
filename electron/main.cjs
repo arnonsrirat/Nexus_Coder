@@ -54,7 +54,8 @@ function createWindow(serverPort) {
     minWidth: 1024,
     minHeight: 700,
     backgroundColor: '#0b0f19',
-    title: 'NexusCoder - OpenRouter Agentic Coding Studio',
+    title: 'NexusCoder — AI Agent Coding Studio',
+    icon: path.join(__dirname, '../build/icon.png'),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
