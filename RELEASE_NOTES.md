@@ -1,12 +1,24 @@
-# 🚀 NexusCoder Studio — Release Notes v1.0.21 (Silent Update Freeze Fix)
+# 🚀 NexusCoder Studio — Release Notes v1.0.22 (Chat-Vanishing Fix & Simpler Status UI)
 
 **วันที่อัปเดต:** 24 สิงหาคม 2026  
-**เวอร์ชัน:** `1.0.21`  
+**เวอร์ชัน:** `1.0.22`  
 **สถานะการ Build:** ✅ สำเร็จ (Windows x64 — Custom Installer + Portable Executable, เซ็นใบรับรองครบ)
 
 ---
 
-## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.21
+## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.22
+
+### 1. 💬 แก้แชทหายไปทันทีก่อน AI จะได้ตอบ
+* **สาเหตุ:** ข้อความที่ผู้ใช้พิมพ์ **ไม่เคยถูกแสดงบนจอทันทีที่กดส่ง** — ระบบรอให้เซิร์ฟเวอร์ส่งข้อความกลับมายืนยันก่อน (ผ่าน event `message_added`) ถึงจะเอาไปแสดงผล ถ้า round-trip นี้สะดุดตรงไหนก็ตาม (เช่น เซิร์ฟเวอร์ปฏิเสธคำขอ, การเชื่อมต่อสะดุดเสี้ยววินาที) ข้อความที่พิมพ์ไปจะไม่ปรากฏบนจอเลยแม้แต่ครั้งเดียว — ดูเหมือนแชททั้งหน้าหายไปทันทีก่อนที่ AI จะได้มีโอกาสตอบด้วยซ้ำ
+* **แก้ไข:** ให้ข้อความของผู้ใช้ขึ้นแสดงทันทีตอนกดส่ง (optimistic update) แล้วพอเซิร์ฟเวอร์ยืนยันกลับมาค่อยสลับเป็นข้อมูลจริงแทนที่ในตำแหน่งเดิม (ไม่ซ้ำกัน) — ต่อให้ round-trip มีปัญหา ข้อความที่พิมพ์ก็จะยังค้างอยู่บนจอให้เห็นเสมอ ไม่หายไปไหน
+
+### 2. 🧹 เอาระบบ "การ์ดแสดงสถานะ AI" แบบซับซ้อนออก เปลี่ยนเป็นแบบเรียบง่าย
+* การ์ดเดิม (`AgentThinkingCard`) มี timer นับเวลาของตัวเอง, breadcrumb 4 ขั้นตอน, เปอร์เซ็นต์ progress, stopwatch ฯลฯ — มีจุดที่ state อาจไม่ตรงกันได้เยอะ
+* เปลี่ยนเป็น `AgentStatusPulse` ที่เรียบง่ายมาก มีแค่ไอคอนหมุน + ข้อความสถานะบรรทัดเดียว ลดพื้นที่ที่จะเกิดบั๊กลงไปมาก
+
+---
+
+## 📄 สรุปจาก v1.0.21 (Silent Update Freeze Fix)
 
 ### 1. 🪟 แก้ระบบอัปเดตค้างหน้าต่าง Command Prompt
 * **สาเหตุที่ 1:** สคริปต์อัปเดตเดิมเรียกตัวติดตั้งด้วย `start /wait "" installer.exe ...` — คำสั่ง `start` จะเปิด process ใหม่แยกต่างหากเสมอ ต่อให้ cmd.exe ตัวแม่ถูกซ่อนหน้าต่างไว้แล้ว (`windowsHide: true`) แต่ process ใหม่ที่ `start` เปิดมีโอกาสได้หน้าต่าง console เป็นของตัวเอง นี่คือตัวที่ทำให้เห็นหน้าต่าง command prompt โผล่ขึ้นมา
@@ -65,6 +77,6 @@
 
 | ประเภทไฟล์ | ชื่อไฟล์ | ขนาด | ลิงก์ไฟล์ |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | `NexusCoder Setup 1.0.21.exe` | ~92 MB | [เปิดไฟล์ติดตั้ง](file:///d:/Project/Project_Program/dist-exe/NexusCoder%20Setup%201.0.21.exe) |
-| **Portable Executable** | `NexusCoder 1.0.21.exe` | ~92 MB | [เปิดตัวพกพา](file:///d:/Project/Project_Program/dist-exe/NexusCoder%201.0.21.exe) |
+| **Windows Installer** | `NexusCoder Setup 1.0.22.exe` | ~92 MB | [เปิดไฟล์ติดตั้ง](file:///d:/Project/Project_Program/dist-exe/NexusCoder%20Setup%201.0.22.exe) |
+| **Portable Executable** | `NexusCoder 1.0.22.exe` | ~92 MB | [เปิดตัวพกพา](file:///d:/Project/Project_Program/dist-exe/NexusCoder%201.0.22.exe) |
 | **Unpacked Folder** | `dist-exe/win-unpacked/` | — | [เปิดโฟลเดอร์](file:///d:/Project/Project_Program/dist-exe/win-unpacked) |
