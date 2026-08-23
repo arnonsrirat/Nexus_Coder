@@ -164,6 +164,49 @@ export class AgentEngine {
     this.emit('message_added', message);
   }
 
+  // Attached images/videos are sent as base64 data URLs, which can be
+  // megabytes of text per attachment. Every turn resends the *entire*
+  // transcript to the model, so once a media message ages past the turn it
+  // was sent in, keeping its raw bytes in every future request does nothing
+  // useful (the model already saw and responded to it) - it only bloats the
+  // prompt and, on long sessions with several images, pushes the transcript
+  // toward OpenRouter's "middle-out" compression, which can literally cut a
+  // base64 blob or JSON structure in half. That produces exactly the
+  // "answers strangely, then stops" behavior users see after attaching
+  // images. Strip old media down to a text placeholder before sending.
+  pruneOldMedia() {
+    for (const m of this.messages) {
+      if (m.role !== 'user' || !Array.isArray(m.content)) continue;
+      let changed = false;
+      m.content = m.content.map(part => {
+        if (part && (part.type === 'image_url' || part.type === 'video_url')) {
+          changed = true;
+          return { type: 'text', text: `[attachment from an earlier turn - already reviewed, omitted here to save context]` };
+        }
+        return part;
+      });
+      if (changed && m.content.every(p => p.type === 'text')) {
+        m.content = m.content.map(p => p.text).join('\n');
+      }
+    }
+  }
+
+  // Find the assistant uiMessage holding an as-yet-unresolved tool call with
+  // this id and attach its result in place. Returns true if a match was
+  // found, so the caller can fall back to a standalone record otherwise.
+  resolveUiToolCall(toolCallId, result) {
+    for (let i = this.uiMessages.length - 1; i >= 0; i--) {
+      const m = this.uiMessages[i];
+      if (m.role !== 'assistant' || !Array.isArray(m.toolCalls) || m.toolCalls.length === 0) continue;
+      const tc = m.toolCalls.find(t => t.id === toolCallId && t.result === undefined);
+      if (tc) {
+        tc.result = result;
+        return true;
+      }
+    }
+    return false;
+  }
+
   deriveTitle() {
     const firstUser = this.uiMessages.find(m => m.role === 'user');
     const text = firstUser?.displayContent || firstUser?.content || '';
@@ -407,6 +450,7 @@ export class AgentEngine {
       timestamp: Date.now()
     };
 
+    this.pruneOldMedia();
     this.messages.push({ role: 'user', content: messageContentForLLM });
     this.addUiMessage(userMsgObj);
     this.saveCurrentSession();
@@ -698,16 +742,27 @@ export class AgentEngine {
           // looked like the agent abandoning the task halfway. When the work is
           // demonstrably unfinished, nudge it to keep going instead of ending
           // the run and making the user re-type the same request.
-          const unfinished = this.detectUnfinishedWork(finalContent);
+          // A finish_reason of "length" means the provider cut the reply off
+          // mid-generation to stay under max_tokens - that's a hard fact, not
+          // a guess, so it always counts as unfinished regardless of mode or
+          // what the (truncated, possibly mid-sentence) text happens to say.
+          // Without this check the run ended right there and looked like the
+          // agent had answered and then vanished.
+          const wasTruncated = response.finishReason === 'length';
+          const unfinished = wasTruncated
+            ? 'the previous reply was cut off by the max output length limit'
+            : this.detectUnfinishedWork(finalContent);
           if (unfinished && this.autoContinueCount < this.maxAutoContinues) {
             this.autoContinueCount++;
             this.messages.push({
               role: 'user',
-              content:
-                `[system] The task is not finished yet (${unfinished}). ` +
-                'Continue working now without asking for confirmation: call the ' +
-                'next tool required to make progress. If the task really is ' +
-                'complete, reply with a short final summary and no tool call.'
+              content: wasTruncated
+                ? '[system] Your previous reply was cut off by the output length limit before it finished. ' +
+                  'Continue exactly where you left off - do not repeat what you already said.'
+                : `[system] The task is not finished yet (${unfinished}). ` +
+                  'Continue working now without asking for confirmation: call the ' +
+                  'next tool required to make progress. If the task really is ' +
+                  'complete, reply with a short final summary and no tool call.'
             });
             this.emit('agent_progress', {
               phase: 'thinking',
@@ -817,13 +872,22 @@ export class AgentEngine {
             result: result
           });
 
-          this.uiMessages.push({
-            id: `tool_${Date.now()}_${tc.id}`,
-            role: 'tool_result',
-            toolName: toolName,
-            result: result,
-            timestamp: Date.now()
-          });
+          // Resolve the matching embedded tool-call entry (persisted at
+          // stream_end as "no result yet") instead of appending a second,
+          // duplicate record. Without this, a session reload showed every
+          // finished tool call as permanently "Running..." plus a separate
+          // Success card underneath - looking like the agent had abandoned
+          // the task even though it had actually finished.
+          const resolved = this.resolveUiToolCall(tc.id, result);
+          if (!resolved) {
+            this.uiMessages.push({
+              id: `tool_${Date.now()}_${tc.id}`,
+              role: 'tool_result',
+              toolName: toolName,
+              result: result,
+              timestamp: Date.now()
+            });
+          }
 
           this.messages.push({
             role: 'tool',

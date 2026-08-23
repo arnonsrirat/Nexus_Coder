@@ -344,6 +344,7 @@ function MessageItemComponent({ message }) {
                 key={tc.id || idx}
                 toolName={tc.name}
                 args={tc.arguments}
+                result={tc.result}
               />
             ))}
           </div>
@@ -360,12 +361,20 @@ function MessageItemComponent({ message }) {
   );
 }
 
+// A tool call resolving from "Running..." to Success/Error changes its
+// `result` field in place while the array length stays the same - so the
+// length-only check below used to miss it and the card looked stuck forever.
+function toolCallsSignature(toolCalls) {
+  if (!toolCalls || toolCalls.length === 0) return '';
+  return toolCalls.map(tc => `${tc.id}:${tc.result === undefined ? 0 : 1}`).join('|');
+}
+
 const MessageItem = React.memo(MessageItemComponent, (prevProps, nextProps) => {
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.reasoning === nextProps.message.reasoning &&
-    prevProps.message.toolCalls?.length === nextProps.message.toolCalls?.length &&
+    toolCallsSignature(prevProps.message.toolCalls) === toolCallsSignature(nextProps.message.toolCalls) &&
     prevProps.message.mode === nextProps.message.mode &&
     prevProps.message.media?.length === nextProps.message.media?.length
   );

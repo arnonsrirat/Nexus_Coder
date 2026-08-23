@@ -120,10 +120,19 @@ export class OpenRouterClient {
       // Model-specific thinking budgets for Claude 3.7 Sonnet
       if (model && model.includes('claude-3.7-sonnet')) {
         const budgetMap = { low: 4000, medium: 8000, high: 16000 };
+        const budgetTokens = budgetMap[reasoningEffort] || 8000;
         payload.thinking = {
           type: 'enabled',
-          budget_tokens: budgetMap[reasoningEffort] || 8000
+          budget_tokens: budgetTokens
         };
+        // Anthropic requires max_tokens to exceed thinking.budget_tokens - it
+        // is the ceiling for thinking + the actual reply combined. The fixed
+        // 8192 default was already smaller than the "high" budget (16000),
+        // so those requests were malformed, and even "medium" (8000) left
+        // almost no room for the actual answer/tool call after thinking used
+        // its budget - the model would get cut off mid-reply and the run
+        // looked like the agent "answered and vanished".
+        payload.max_tokens = Math.max(maxTokens, budgetTokens + 4096);
       }
     }
 
@@ -210,6 +219,7 @@ export class OpenRouterClient {
     let toolCallsMap = {};
     let usage = null;
     let buffer = '';
+    let finishReason = null;
 
     armWatchdog(stallTimeoutMs);
 
@@ -245,6 +255,10 @@ export class OpenRouterClient {
           }
 
           if (!choice) continue;
+
+          if (choice.finish_reason) {
+            finishReason = choice.finish_reason;
+          }
 
           // Check for reasoning tokens (e.g., DeepSeek R1 or Claude thinking)
           const reasoning = choice.delta?.reasoning || choice.delta?.thought;
@@ -318,7 +332,8 @@ export class OpenRouterClient {
       content: fullText,
       reasoning: fullReasoning,
       toolCalls: toolCalls,
-      usage: usage
+      usage: usage,
+      finishReason: finishReason
     };
   }
 

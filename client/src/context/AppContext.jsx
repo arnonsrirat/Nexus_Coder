@@ -339,7 +339,16 @@ export function AppProvider({ children }) {
             if (data.downloadProgress) setUpdateProgress(data.downloadProgress);
             break;
 
+          // update_progress/update_ready/update_error each used to appear a
+          // second time later in this same switch (right before
+          // 'history_cleared') with extra behavior - a switch only ever runs
+          // the FIRST matching case, so that second copy was dead code and
+          // its extra lines never ran: downloading progress never flipped
+          // the status to 'downloading', and worse, a ready update never
+          // opened the update modal to prompt the user to install it. Merged
+          // here so both actually happen.
           case 'update_progress':
+            setUpdateStatus('downloading');
             setUpdateProgress(data);
             break;
 
@@ -348,6 +357,7 @@ export function AppProvider({ children }) {
             if (data.version) {
               setUpdateInfo(prev => ({ ...prev, latestVersion: data.version }));
             }
+            setIsUpdateModalOpen(true);
             break;
 
           case 'update_error':
@@ -518,16 +528,35 @@ export function AppProvider({ children }) {
               stepText: `Completed action: ${data.name}. Analyzing results...`,
               toolName: data.name
             }));
-            setMessages(prev => [
-              ...prev,
-              {
-                id: `tool_${Date.now()}_${data.toolCallId}`,
-                role: 'tool_result',
-                toolName: data.name,
-                result: data.result,
-                timestamp: Date.now()
-              }
-            ]);
+            // Resolve the matching embedded tool-call card (it was rendered as
+            // "Running..." at stream_end) instead of appending a second,
+            // duplicate card - that duplication was what made finished work
+            // look stuck / like it had vanished mid-task.
+            setMessages(prev => {
+              let matched = false;
+              const updated = prev.map(m => {
+                if (matched || m.role !== 'assistant' || !m.toolCalls || m.toolCalls.length === 0) return m;
+                const idx = m.toolCalls.findIndex(tc => tc.id === data.toolCallId && tc.result === undefined);
+                if (idx === -1) return m;
+                matched = true;
+                const newToolCalls = [...m.toolCalls];
+                newToolCalls[idx] = { ...newToolCalls[idx], result: data.result };
+                return { ...m, toolCalls: newToolCalls };
+              });
+              if (matched) return updated;
+              // Fallback: no matching embedded call found (e.g. approved
+              // action from a pending prompt) - show it as its own card.
+              return [
+                ...prev,
+                {
+                  id: `tool_${Date.now()}_${data.toolCallId}`,
+                  role: 'tool_result',
+                  toolName: data.name,
+                  result: data.result,
+                  timestamp: Date.now()
+                }
+              ];
+            });
             break;
 
           case 'file_modified':
@@ -581,7 +610,17 @@ export function AppProvider({ children }) {
             ]);
             break;
 
-          case 'error':
+          case 'error': {
+            // There used to be a second, later `case 'error':` in this same
+            // switch that always pushed a visible chat message - but a JS
+            // switch only ever runs the FIRST matching case, so that block
+            // was dead code and every error (e.g. "Agent is already
+            // running", a dropped connection mid-task) was silently
+            // swallowed into agentProgress.stepText, a field only shown by
+            // AgentThinkingCard - which this same update unmounts by setting
+            // isBusy:false. The user saw nothing at all: a message sent, or
+            // a run in progress, would just vanish with no explanation.
+            // Merged here so an error is always visible in the transcript.
             if (streamBufferRef.current.content || streamData.content) {
               const partial = streamBufferRef.current.content || streamData.content;
               setMessages(prev => [
@@ -604,7 +643,17 @@ export function AppProvider({ children }) {
               percent: 0,
               stepText: `Error: ${data.message || 'An error occurred'}`
             }));
+            setMessages(prev => [
+              ...prev,
+              {
+                id: `err_${Date.now()}`,
+                role: 'system_error',
+                content: data.message || 'An error occurred.',
+                timestamp: Date.now()
+              }
+            ]);
             break;
+          }
 
           case 'agent_stopped':
             if (streamBufferRef.current.content || streamData.content) {
@@ -655,37 +704,10 @@ export function AppProvider({ children }) {
             setTerminalLogs(prev => [...prev.slice(-900), `[Process exited with code ${data.exitCode}]\n`]);
             break;
 
-          case 'update_progress':
-            setUpdateStatus('downloading');
-            setUpdateProgress(data);
-            break;
-
-          case 'update_ready':
-            setUpdateStatus('ready');
-            setIsUpdateModalOpen(true);
-            break;
-
-          case 'update_error':
-            setUpdateStatus('error');
-            break;
-
           case 'history_cleared':
             setMessages([]);
             setPendingPrompt(null);
             setAgentStatus('idle');
-            break;
-
-          case 'error':
-            setAgentStatus('idle');
-            setMessages(prev => [
-              ...prev,
-              {
-                id: `err_${Date.now()}`,
-                role: 'system_error',
-                content: data.message,
-                timestamp: Date.now()
-              }
-            ]);
             break;
 
           default:
