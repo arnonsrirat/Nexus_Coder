@@ -522,7 +522,7 @@ export function AppProvider({ children }) {
   }, [workspaceRoot, refreshTree]);
 
   // Actions
-  const sendMessage = (text, attachedFiles = []) => {
+  const sendMessage = (text, attachedFiles = [], media = []) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       alert('WebSocket is not connected to backend.');
       return;
@@ -533,6 +533,7 @@ export function AppProvider({ children }) {
       payload: {
         prompt: text,
         attachedFiles: [...pinnedContextFiles, ...attachedFiles],
+        media: media,
         mode: agentMode,
         reasoningEffort: reasoningEffort
       }

@@ -40,7 +40,8 @@ for (const p of possiblePkgPaths) {
 }
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Initialize config, session store, agent engine & app updater
 const configStore = new ConfigStore();
@@ -160,7 +161,7 @@ if (clientDistPath) {
 
 // Create HTTP and WebSocket Server
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: 100 * 1024 * 1024 });
 
 function broadcast(event, data) {
   const payload = JSON.stringify({ event, data });
@@ -326,7 +327,8 @@ wss.on('connection', (ws) => {
               payload.attachedFiles || [],
               {
                 mode: payload.mode,
-                reasoningEffort: payload.reasoningEffort
+                reasoningEffort: payload.reasoningEffort,
+                media: payload.media || []
               }
             );
           } catch (err) {

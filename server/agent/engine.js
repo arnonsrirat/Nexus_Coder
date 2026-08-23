@@ -305,6 +305,35 @@ export class AgentEngine {
       this.messages[0] = systemMessage;
     }
 
+    let messageContentForLLM;
+    if (options.media && options.media.length > 0) {
+      messageContentForLLM = [
+        {
+          type: 'text',
+          text: fullUserContent || 'Please inspect the attached image / video and assist based on it.'
+        }
+      ];
+      for (const m of options.media) {
+        if (m.type === 'video' || (m.mimeType && m.mimeType.startsWith('video/'))) {
+          messageContentForLLM.push({
+            type: 'video_url',
+            video_url: {
+              url: m.dataUrl
+            }
+          });
+        } else {
+          messageContentForLLM.push({
+            type: 'image_url',
+            image_url: {
+              url: m.dataUrl
+            }
+          });
+        }
+      }
+    } else {
+      messageContentForLLM = fullUserContent;
+    }
+
     const userMsgObj = {
       id: `msg_${Date.now()}_user`,
       role: 'user',
@@ -313,10 +342,11 @@ export class AgentEngine {
       mode: this.mode,
       reasoningEffort: this.reasoningEffort,
       attachedFiles: attachedFiles,
+      media: options.media || [],
       timestamp: Date.now()
     };
 
-    this.messages.push({ role: 'user', content: fullUserContent });
+    this.messages.push({ role: 'user', content: messageContentForLLM });
     this.addUiMessage(userMsgObj);
     this.saveCurrentSession();
 
