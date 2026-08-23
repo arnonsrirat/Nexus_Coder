@@ -1,27 +1,38 @@
-# 🚀 NexusCoder Studio — Release Notes v1.0.16 (System Agent Mode & Host OS Management)
+# 🚀 NexusCoder Studio — Release Notes v1.0.17 (Foldable Layout & Streaming Performance)
 
 **วันที่อัปเดต:** 24 สิงหาคม 2026  
-**เวอร์ชัน:** `1.0.16`  
+**เวอร์ชัน:** `1.0.17`  
 **สถานะการ Build:** ✅ สำเร็จ (Windows x64 NSIS Installer + Portable Executable)
 
 ---
 
-## 🛠️ รายการปรับปรุงและฟีเจอร์ใหม่ใน v1.0.16
+## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.17
 
-### 1. 🖥️ เพิ่มโหมดใหม่: System Agent Mode (โหมดผู้ช่วยตรวจและจัดการเครื่อง)
-* **ทำงานอิสระโดยไม่ต้องเปิดโปรเจกต์:** ผู้ใช้สามารถเปิดโปรแกรมและสลับไปที่แท็บโหมด **System** (ไอคอนจอภาพสีส้ม 🖥️) เพื่อเริ่มให้ AI ตรวจสอบและจัดการเครื่องได้ทันที
-* **เครื่องมือระบบเฉพาะทาง (Native OS Diagnostic Tools):**
-  * `get_system_info`: รายงานสเปกเครื่องแบบละเอียด, สถานะ CPU (Usage %, Cores), RAM total/used/free, พื้นที่ว่างในทุกไดรฟ์ (C:, D: ฯลฯ), IP Address & Network Interfaces, และ Uptime
-  * `list_processes`: ดึงรายชื่อ Process ที่รันอยู่ พร้อมการเรียงลำดับตาม RAM หรือ CPU เพื่อหาโปรเซสที่กินทรัพยากรสูง หรือโปรเซสที่ค้าง
-  * `kill_process`: คำสั่งสั่งปิด/Terminate Process ที่มีปัญหาตาม PID หรือชื่อแอปพลิเคชัน
-  * `get_network_info`: ตรวจสอบ Listening Ports (เช่น 3000, 8080, 5000) และจับคู่ Process ID ที่กำลังเปิดพอร์ต
-  * `run_command` & จัดการไฟล์: สั่งรัน PowerShell, CMD, Bash และเข้าถึงไฟล์ทั่วทุกไดรฟ์ของเครื่อง (`C:\`, `D:\`, `%USERPROFILE%`, `%TEMP%`)
-* **Persona และ System Prompt เฉพาะ:** กำหนดให้ Agent มีความเชี่ยวชาญด้าน OS Diagnostics, System Admin, DevOps และการแก้ปัญหาเครื่องอย่างปลอดภัย
+### 1. 🧩 พับ/ซ่อนแผงเค้าโครงหน้าได้ทุกคอลัมน์ (Foldable Panel Chrome)
+* เพิ่ม **แถบหัวแผง** ให้ทุกคอลัมน์ (Explorer / Code Editor / AI Chat) ประกอบด้วยที่จับลาก, ไอคอน, ชื่อแผง และปุ่มพับเก็บ
+* เดิมมีเพียงแผง Chat ที่พับได้จากในตัวเอง ส่วน Explorer และ Editor ต้องสั่งพับจากเมนู Layout บน Header เท่านั้น
+* พับแล้วยุบเป็นแถบไอคอนแนวตั้ง คลิกเพื่อกางกลับ และจดจำสถานะไว้ใน `localStorage` เช่นเดิม
 
-### 2. 🎨 ปรับปรุง UI และ Chat Experience
-* **ModeSelector:** เพิ่มปุ่มสลับโหมด **System** สีอำพัน Amber/Orange
-* **Dynamic Quick Prompts & Welcome Screen:** แนะนำคำสั่งตรวจสุขภาพเครื่อง, ตรวจโปรเซส, เช็คพอร์ต และเคลียร์ไฟล์ขยะแคช
-* **Chat History Badges:** แสดงป้ายกำกับโหมด `System` ในประวัติการแชต
+### 2. 🖱️ แก้บั๊กลากย้ายตำแหน่งแผงไม่ติด (Drag-to-Reorder)
+* **สาเหตุ:** ระบบเดิมใช้ HTML5 Drag-and-Drop ซึ่งถูก Monaco Editor, Terminal และฟอร์มแชต (ที่เรียก `stopPropagation()` บน `onDragOver`) ดูดอีเวนต์ไป ทำให้การลากหลุดกลางทางเป็นประจำ
+* **แก้ไข:** เปลี่ยนมาใช้ **Pointer Events + `setPointerCapture`** ทุกอีเวนต์การเคลื่อนเมาส์จึงวิ่งกลับมาที่ที่จับลากเสมอ ไม่ว่าเคอร์เซอร์จะลากผ่านองค์ประกอบใด
+* แก้ลำดับการจัดเรียงใน `movePanel` — เดิมคำนวณตำแหน่งแทรกจาก index ก่อนลบรายการ ทำให้ลากไปทางขวาแล้วเหมือนไม่มีอะไรเกิดขึ้น
+* แก้ `ResizeHandle` ให้อ่านสถานะการลากจาก ref แทน state จึงไม่ทิ้งพิกเซลช่วงแรกของการลากเร็ว ๆ อีกต่อไป
+* ตัวแบ่งขนาดจะแสดงเฉพาะระหว่างแผงที่เปิดอยู่จริง และปรับความกว้างคอลัมน์ที่กำหนดขนาดได้จริง (เดิมลากฝั่ง Editor ซึ่งเป็น `flex-1` แล้วไม่ขยับ)
+
+### 3. ⚡ แก้อาการแล็คตอน AI พิมพ์ และตอนผู้ใช้พิมพ์ (Streaming Performance)
+* **แยก `AgentStreamContext` ออกจาก Context หลัก:** สถานะที่อัปเดตถี่ (token stream, progress) ไม่ทำให้ Editor, Sidebar และ Header re-render ตามทุกตัวอักษรอีกต่อไป พร้อม `useMemo` ค่า Context ทั้งสองชุดและตรึง identity ของฟังก์ชัน action
+* **รวม Throttle ของ content/reasoning เป็นชุดเดียว** แล้ว flush บน `requestAnimationFrame` ทุก 80ms (เดิมใช้ 2 timer แย่งกันจนอีกฝั่งถูกหน่วง)
+* **แยกกล่องพิมพ์เป็น `ChatComposer`:** ข้อความที่กำลังพิมพ์เก็บอยู่ใน state ของกล่องเอง การพิมพ์จึงไม่ re-render ประวัติแชตทั้งหมด — เป็นตัวแก้อาการ "พิมพ์แล้วหนืด" โดยตรง
+* **`StreamingMessage`:** ข้อความที่กำลังไหลจะแสดงเป็นข้อความธรรมดาระหว่างสตรีม (การ parse Markdown ของเอกสารที่ยาวขึ้นเรื่อย ๆ สิบกว่าครั้งต่อวินาทีคือตัวกิน Main Thread) แล้วจึงเรนเดอร์เป็น Markdown เต็มรูปแบบเมื่อจบสตรีม
+
+### 4. 🤖 แก้ปัญหา AI ทิ้งงานกลางคัน (Auto-Continue)
+* เดิม Agent Engine ถือว่า "turn ที่ไม่เรียกเครื่องมือ = งานเสร็จ" ทันที แต่โมเดลมักบรรยายว่า *"ต่อไปผมจะแก้ไฟล์ config..."* แล้วหยุด ทำให้ผู้ใช้ต้องพิมพ์สั่งต่อเองตลอด
+* เพิ่ม `detectUnfinishedWork()` ตรวจ 2 เงื่อนไข:
+  * แผนงานใน `update_plan` ยังมีขั้นตอนที่สถานะไม่ใช่ `completed`
+  * ข้อความสุดท้ายประกาศว่าจะทำอะไรต่อแต่ยังไม่ได้ลงมือ (จับรูปประโยคทั้งภาษาอังกฤษและภาษาไทย)
+* หากเข้าเงื่อนไข ระบบจะ **สั่งให้ทำงานต่อเองอัตโนมัติ** สูงสุด 3 ครั้งต่อรอบ (รีเซ็ตโควตาทุกครั้งที่มีความคืบหน้าจริง) พร้อมแสดงสถานะ `Auto-continuing (n/3)` ให้ผู้ใช้เห็น
+* ทำงานเฉพาะโหมด **Agent** และ **System** เท่านั้น ไม่รบกวนโหมด Ask และ Plan ที่ตอบแล้วจบตามธรรมชาติ
 
 ---
 
@@ -29,7 +40,6 @@
 
 | ประเภทไฟล์ | ชื่อไฟล์ | ขนาด | ลิงก์ไฟล์ |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | `NexusCoder Setup 1.0.16.exe` | ~109 MB | [เปิดไฟล์ติดตั้ง](file:///d:/Project/Project_Program/dist-exe/NexusCoder%20Setup%201.0.16.exe) |
-| **Portable Executable** | `NexusCoder 1.0.16.exe` | ~108 MB | [เปิดตัวพกพา](file:///d:/Project/Project_Program/dist-exe/NexusCoder%201.0.16.exe) |
+| **Windows Installer** | `NexusCoder Setup 1.0.17.exe` | ~109 MB | [เปิดไฟล์ติดตั้ง](file:///d:/Project/Project_Program/dist-exe/NexusCoder%20Setup%201.0.17.exe) |
+| **Portable Executable** | `NexusCoder 1.0.17.exe` | ~108 MB | [เปิดตัวพกพา](file:///d:/Project/Project_Program/dist-exe/NexusCoder%201.0.17.exe) |
 | **Unpacked Folder** | `dist-exe/win-unpacked/` | — | [เปิดโฟลเดอร์](file:///d:/Project/Project_Program/dist-exe/win-unpacked) |
-

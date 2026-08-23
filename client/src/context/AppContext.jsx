@@ -1,8 +1,19 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as api from '../services/api';
 import { usePanelSizes } from '../hooks/usePanelSizes';
 
+// How often the live token stream is allowed to repaint the chat, in ms.
+// ~12 fps of text updates reads as instant while leaving the main thread free
+// for typing and scrolling.
+const STREAM_FLUSH_MS = 80;
+
 const AppContext = createContext(null);
+
+// Hot, high-frequency agent state (token stream, progress bar, step log) lives
+// in its own context. It ticks many times per second while the model is
+// answering; keeping it out of the main context is what stops every panel in
+// the app from re-rendering on every token.
+const AgentStreamContext = createContext(null);
 
 export function AppProvider({ children }) {
   // Config & Modals
@@ -63,9 +74,44 @@ export function AppProvider({ children }) {
   const [currentChatId, setCurrentChatId] = useState(null);
   const [currentChatTitle, setCurrentChatTitle] = useState('New Conversation');
 
-  // Throttled streaming buffer for lag-free rendering
+  // Throttled streaming buffer for lag-free rendering.
+  // Tokens arrive far faster than the screen can paint, so chunks are collected
+  // in a ref and flushed at most once per STREAM_FLUSH_MS on an animation frame.
+  // Both content and reasoning share one flush, so a burst of either can never
+  // starve the other the way two competing timers used to.
   const streamBufferRef = useRef({ content: '', reasoning: '' });
   const streamTimerRef = useRef(null);
+  const streamRafRef = useRef(null);
+
+  const flushStreamBuffer = useCallback(() => {
+    streamTimerRef.current = null;
+    streamRafRef.current = null;
+    const { content, reasoning } = streamBufferRef.current;
+    setStreamData(prev => (
+      prev.content === content && prev.reasoning === reasoning
+        ? prev
+        : { ...prev, content, reasoning }
+    ));
+  }, []);
+
+  const scheduleStreamFlush = useCallback(() => {
+    if (streamTimerRef.current) return;
+    streamTimerRef.current = setTimeout(() => {
+      // Paint on a frame boundary so we never render mid-layout.
+      streamRafRef.current = requestAnimationFrame(flushStreamBuffer);
+    }, STREAM_FLUSH_MS);
+  }, [flushStreamBuffer]);
+
+  const cancelStreamFlush = useCallback(() => {
+    if (streamTimerRef.current) {
+      clearTimeout(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+    if (streamRafRef.current) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
+  }, []);
 
   // Interactive Canvas & Visual Plan
   const [isCanvasOpen, setIsCanvasOpen] = useState(false);
@@ -361,36 +407,23 @@ export function AppProvider({ children }) {
               stepText: prev.stepText || 'NexusCoder is thinking...',
               startedAt: prev.startedAt || Date.now()
             }));
-            if (streamTimerRef.current) clearTimeout(streamTimerRef.current);
+            cancelStreamFlush();
             streamBufferRef.current = { content: '', reasoning: '' };
             setStreamData({ content: '', reasoning: '', toolCalls: [] });
             break;
 
           case 'stream_chunk':
             streamBufferRef.current.content = data.content;
-            if (!streamTimerRef.current) {
-              streamTimerRef.current = setTimeout(() => {
-                setStreamData(prev => ({ ...prev, content: streamBufferRef.current.content }));
-                streamTimerRef.current = null;
-              }, 40);
-            }
+            scheduleStreamFlush();
             break;
 
           case 'stream_reasoning':
             streamBufferRef.current.reasoning = data.reasoning;
-            if (!streamTimerRef.current) {
-              streamTimerRef.current = setTimeout(() => {
-                setStreamData(prev => ({ ...prev, reasoning: streamBufferRef.current.reasoning }));
-                streamTimerRef.current = null;
-              }, 40);
-            }
+            scheduleStreamFlush();
             break;
 
           case 'stream_end':
-            if (streamTimerRef.current) {
-              clearTimeout(streamTimerRef.current);
-              streamTimerRef.current = null;
-            }
+            cancelStreamFlush();
             setAgentStatus('executing_tool');
             const endContent = (data.content !== undefined && data.content !== null && data.content !== '')
               ? data.content 
@@ -997,7 +1030,65 @@ export function AppProvider({ children }) {
     }
   };
 
-  const value = {
+  // Actions are re-created on every render. Wrap them once in stable
+  // identities so the context value only changes when real state changes.
+  const actionsRef = useRef(null);
+  actionsRef.current = {
+    setTheme,
+    saveSettings,
+    selectWorkspaceFolder,
+    openFileInEditor,
+    closeTab,
+    updateTabContent,
+    saveActiveFile,
+    togglePinContextFile,
+    refreshTree,
+    setAgentMode: handleSetAgentMode,
+    setReasoningEffort: handleSetReasoningEffort,
+    sendMessage,
+    respondInteractivePrompt,
+    stopAgent,
+    continueRun,
+    clearChat,
+    switchChat,
+    createNewChat,
+    renameChatSession,
+    deleteChatSession,
+    runTerminalCommand,
+    killTerminalCommand,
+    checkUpdates,
+    startDownloadUpdate,
+    applyUpdate,
+    clearUpdateCache
+  };
+
+  const actions = useMemo(() => {
+    const names = Object.keys(actionsRef.current);
+    const stable = {};
+    for (const name of names) {
+      stable[name] = (...args) => actionsRef.current[name](...args);
+    }
+    return stable;
+  }, []);
+
+  // `isAgentBusy` is intentionally a boolean, not the agentProgress object:
+  // it only flips when the agent starts or finishes, so consumers that just
+  // need "is it working?" do not re-render on every progress tick.
+  const isAgentBusy =
+    agentStatus === 'streaming' ||
+    agentStatus === 'executing_tool' ||
+    Boolean(agentProgress?.isBusy);
+
+  const streamValue = useMemo(() => ({
+    streamData,
+    agentProgress,
+    setAgentProgress,
+    agentStepLog,
+    agentStatus,
+    isAgentBusy
+  }), [streamData, agentProgress, agentStepLog, agentStatus, isAgentBusy]);
+
+  const value = useMemo(() => ({
     // Settings & State
     hasApiKey,
     model,
@@ -1010,8 +1101,6 @@ export function AppProvider({ children }) {
     recentWorkspaces,
     appVersion,
     theme,
-    setTheme,
-    saveSettings,
 
     // Resizable & Customizable Layout
     panelSizes,
@@ -1037,40 +1126,19 @@ export function AppProvider({ children }) {
     fileDiffs,
     activeDiff,
     setActiveDiff,
-    selectWorkspaceFolder,
-    openFileInEditor,
-    closeTab,
-    updateTabContent,
-    saveActiveFile,
-    togglePinContextFile,
-    refreshTree,
 
     // Agent & Modes
     agentMode,
-    setAgentMode: handleSetAgentMode,
     reasoningEffort,
-    setReasoningEffort: handleSetReasoningEffort,
     messages,
     agentStatus,
-    agentProgress,
-    setAgentProgress,
-    streamData,
+    isAgentBusy,
     pendingPrompt,
-    agentStepLog,
-    sendMessage,
-    respondInteractivePrompt,
-    stopAgent,
-    continueRun,
-    clearChat,
 
     // Chat Sessions History
     chatSessions,
     currentChatId,
     currentChatTitle,
-    switchChat,
-    createNewChat,
-    renameChatSession,
-    deleteChatSession,
 
     // Canvas & Visual Plan
     isCanvasOpen,
@@ -1087,8 +1155,6 @@ export function AppProvider({ children }) {
     setTerminalOpen,
     terminalLogs,
     setTerminalLogs,
-    runTerminalCommand,
-    killTerminalCommand,
 
     // Software Updates
     updateStatus,
@@ -1100,15 +1166,30 @@ export function AppProvider({ children }) {
     setUpdateRepo,
     autoCheckUpdates,
     setAutoCheckUpdates,
-    checkUpdates,
-    startDownloadUpdate,
-    applyUpdate,
-    clearUpdateCache
-  };
+
+    ...actions
+  }), [
+    hasApiKey, model, models, autoApprove, isSettingsOpen, isFolderPickerOpen,
+    recentWorkspaces, appVersion, theme,
+    panelSizes, panelOrder, panelVisibility, resizePanel, resetPanel,
+    resetAllPanels, togglePanelVisibility, setPanelVisibility, movePanel,
+    reorderPanels, resetLayout,
+    workspaceRoot, workspaceName, fileTree, activeTabs, activeTabPath,
+    pinnedContextFiles, fileDiffs, activeDiff,
+    agentMode, reasoningEffort, messages, agentStatus, isAgentBusy, pendingPrompt,
+    chatSessions, currentChatId, currentChatTitle,
+    isCanvasOpen, activePlan, activeCanvas, canvasViewMode,
+    terminalOpen, terminalLogs,
+    updateStatus, updateInfo, updateProgress, isUpdateModalOpen, updateRepo,
+    autoCheckUpdates,
+    actions
+  ]);
 
   return (
     <AppContext.Provider value={value}>
-      {children}
+      <AgentStreamContext.Provider value={streamValue}>
+        {children}
+      </AgentStreamContext.Provider>
     </AppContext.Provider>
   );
 }
@@ -1116,5 +1197,13 @@ export function AppProvider({ children }) {
 export function useApp() {
   const context = useContext(AppContext);
   if (!context) throw new Error('useApp must be used within AppProvider');
+  return context;
+}
+
+// Subscribe to the live token stream / progress only where it is actually
+// rendered, so a streaming answer never re-renders the editor or the sidebar.
+export function useAgentStream() {
+  const context = useContext(AgentStreamContext);
+  if (!context) throw new Error('useAgentStream must be used within AppProvider');
   return context;
 }

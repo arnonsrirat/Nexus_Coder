@@ -13,14 +13,16 @@ import {
   Zap,
   Terminal
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useAgentStream } from '../../context/AppContext';
 
 export default function AgentThinkingCard() {
-  const { 
-    agentProgress, 
-    streamData, 
-    agentStatus 
-  } = useApp();
+  // Subscribes to the hot stream context only: this card ticks constantly while
+  // the agent works, and must not drag the rest of the app along with it.
+  const {
+    agentProgress,
+    streamData,
+    agentStatus
+  } = useAgentStream();
 
   const [isReasoningExpanded, setIsReasoningExpanded] = useState(true);
   const [elapsed, setElapsed] = useState(0);

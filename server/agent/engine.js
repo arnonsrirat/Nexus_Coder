@@ -124,6 +124,11 @@ export class AgentEngine {
     this.maxIterations = 300;
     // Transient upstream failures (network blip, 429, 502) must not end a run.
     this.maxStreamRetries = 5;
+    // How many times a single run may nudge itself to keep going after the
+    // model stopped without finishing. Bounded so a confused model can never
+    // loop forever.
+    this.maxAutoContinues = 3;
+    this.autoContinueCount = 0;
 
     // Active session state.
     // `messages` is the raw OpenRouter transcript (system prompt, tool frames);
@@ -490,6 +495,44 @@ export class AgentEngine {
     this.emit('tool_status', status);
   }
 
+  /**
+   * Decide whether an assistant turn that made no tool call actually left work
+   * on the table. Returns a short human-readable reason, or null when the run
+   * looks genuinely complete.
+   */
+  detectUnfinishedWork(content) {
+    // Only autonomous modes act on their own; ask/plan modes answer and stop.
+    if (this.mode !== 'agent' && this.mode !== 'system') return null;
+
+    const steps = this.activePlan?.steps;
+    if (Array.isArray(steps) && steps.length > 0) {
+      const remaining = steps.filter(s => s && s.status !== 'completed');
+      if (remaining.length > 0) {
+        const names = remaining.slice(0, 3).map(s => s.title).join(', ');
+        return `${remaining.length} plan step(s) still open: ${names}`;
+      }
+    }
+
+    const text = (content || '').trim();
+    if (!text) return null;
+
+    // Phrases that announce an action instead of reporting one. Thai included
+    // because the UI is used bilingually.
+    const intentPatterns = [
+      /\b(next|now)[,]?\s+(i|we)('?ll| will| am going to| going to)\b/i,
+      /\b(i|we)('?ll| will| am going to| going to)\s+(now\s+)?(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
+      /\blet me\s+(now\s+)?(create|add|update|write|edit|modify|fix|implement|refactor|install|run|check|read|continue)\b/i,
+      /\b(proceeding|continuing|moving on) (to|with)\b/i,
+      /(ต่อไป|ขั้นตอนถัดไป|กำลังจะ|เดี๋ยว(ผม|ฉัน|เรา))/
+    ];
+
+    if (intentPatterns.some(re => re.test(text))) {
+      return 'the last message announced a next action but performed none';
+    }
+
+    return null;
+  }
+
   async runLoop() {
     let iteration = 0;
     const tools = this.getToolsForMode();
@@ -650,6 +693,32 @@ export class AgentEngine {
         this.saveCurrentSession();
 
         if (!response.toolCalls || response.toolCalls.length === 0) {
+          // A turn with no tool call usually means "done" - but models also
+          // narrate ("Next I'll update the config...") and then stop, which
+          // looked like the agent abandoning the task halfway. When the work is
+          // demonstrably unfinished, nudge it to keep going instead of ending
+          // the run and making the user re-type the same request.
+          const unfinished = this.detectUnfinishedWork(finalContent);
+          if (unfinished && this.autoContinueCount < this.maxAutoContinues) {
+            this.autoContinueCount++;
+            this.messages.push({
+              role: 'user',
+              content:
+                `[system] The task is not finished yet (${unfinished}). ` +
+                'Continue working now without asking for confirmation: call the ' +
+                'next tool required to make progress. If the task really is ' +
+                'complete, reply with a short final summary and no tool call.'
+            });
+            this.emit('agent_progress', {
+              phase: 'thinking',
+              percent: Math.min(30 + iteration * 5, 85),
+              step: `Auto-continuing (${this.autoContinueCount}/${this.maxAutoContinues}) - task not finished yet...`,
+              iteration
+            });
+            this.saveCurrentSession();
+            continue;
+          }
+
           this.isRunning = false;
           this.emit('agent_progress', {
             phase: 'completed',
@@ -664,6 +733,9 @@ export class AgentEngine {
           this.saveCurrentSession();
           return;
         }
+
+        // Real progress was made, so the nudge budget is refreshed.
+        this.autoContinueCount = 0;
 
         let requiresUserPause = false;
 

@@ -16,6 +16,10 @@ import React, { useCallback, useRef, useState } from 'react';
 export default function ResizeHandle({ orientation = 'horizontal', onDelta, onDoubleClick, title }) {
   const [active, setActive] = useState(false);
   const lastRef = useRef(0);
+  // Mirrors `active` in a ref: the pointermove handler must not depend on a
+  // state update having been committed, or the first few pixels of a fast drag
+  // are dropped and the divider feels stuck.
+  const activeRef = useRef(false);
 
   const isHorizontal = orientation === 'horizontal';
 
@@ -23,28 +27,30 @@ export default function ResizeHandle({ orientation = 'horizontal', onDelta, onDo
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     lastRef.current = isHorizontal ? e.clientX : e.clientY;
+    activeRef.current = true;
     setActive(true);
     document.body.style.cursor = isHorizontal ? 'col-resize' : 'row-resize';
     document.body.style.userSelect = 'none';
   }, [isHorizontal]);
 
   const handlePointerMove = useCallback((e) => {
-    if (!active) return;
+    if (!activeRef.current) return;
     const current = isHorizontal ? e.clientX : e.clientY;
     const delta = current - lastRef.current;
     if (delta !== 0) {
       lastRef.current = current;
       onDelta(delta);
     }
-  }, [active, isHorizontal, onDelta]);
+  }, [isHorizontal, onDelta]);
 
   const endDrag = useCallback((e) => {
-    if (!active) return;
+    if (!activeRef.current) return;
+    activeRef.current = false;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
     setActive(false);
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-  }, [active]);
+  }, []);
 
   return (
     <div

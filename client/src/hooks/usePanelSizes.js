@@ -146,12 +146,18 @@ export function usePanelSizes() {
   const movePanel = useCallback((sourceKey, targetKey) => {
     if (!sourceKey || !targetKey || sourceKey === targetKey) return;
     setPanelOrder(prev => {
-      const next = [...prev];
-      const fromIndex = next.indexOf(sourceKey);
-      const toIndex = next.indexOf(targetKey);
+      const fromIndex = prev.indexOf(sourceKey);
+      const toIndex = prev.indexOf(targetKey);
       if (fromIndex === -1 || toIndex === -1) return prev;
-      next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, sourceKey);
+
+      // Remove first, then resolve the target's *new* index. Splicing at the
+      // pre-removal index shifted every rightward move one slot too far left,
+      // which is why dropping a column on its right neighbour looked like it
+      // did nothing.
+      const next = prev.filter(k => k !== sourceKey);
+      const targetIndex = next.indexOf(targetKey);
+      const insertAt = fromIndex < toIndex ? targetIndex + 1 : targetIndex;
+      next.splice(insertAt, 0, sourceKey);
       return next;
     });
   }, []);
