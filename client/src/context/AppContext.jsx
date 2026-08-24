@@ -790,18 +790,6 @@ export function AppProvider({ children }) {
     }
   }, [workspaceRoot, refreshTree]);
 
-  // Global Keyboard Shortcut: Ctrl+Shift+N or Cmd+Shift+N to create a new chat
-  useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
-        e.preventDefault();
-        createNewChat({ withSummary: false });
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [createNewChat]);
-
   // Actions
   const sendMessage = (text, attachedFiles = [], media = []) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -1213,6 +1201,18 @@ export function AppProvider({ children }) {
     }
     return stable;
   }, []);
+
+  // Global Keyboard Shortcut: Ctrl+Shift+N or Cmd+Shift+N to create a new chat
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+        e.preventDefault();
+        createNewChat({ withSummary: false });
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [createNewChat]);
 
   // `isAgentBusy` is intentionally a boolean, not the agentProgress object:
   // it only flips when the agent starts or finishes, so consumers that just
