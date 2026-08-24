@@ -310,7 +310,8 @@ wss.on('connection', (ws) => {
       chatId: agentEngine.currentSessionId,
       messages: agentEngine.uiMessages,
       activePlan: agentEngine.activePlan,
-      activeCanvas: agentEngine.activeCanvas
+      activeCanvas: agentEngine.activeCanvas,
+      contextStats: agentEngine.getContextStats()
     }
   }));
 
@@ -368,6 +369,31 @@ wss.on('connection', (ws) => {
           }
           break;
 
+        case 'compact_context':
+          try {
+            const result = agentEngine.compactContext({ force: true });
+            ws.send(JSON.stringify({ event: 'context_compacted', data: result }));
+          } catch (err) {
+            ws.send(JSON.stringify({ event: 'error', data: { message: err.message } }));
+          }
+          break;
+
+        case 'branch_chat':
+          if (agentEngine.isRunning) {
+            ws.send(JSON.stringify({
+              event: 'error',
+              data: { message: 'Stop the running task before branching chat.' }
+            }));
+            break;
+          }
+          try {
+            const branchedChat = agentEngine.createBranchWithSummary(payload?.baseChatId);
+            broadcast('chat_created', { chat: branchedChat });
+          } catch (err) {
+            ws.send(JSON.stringify({ event: 'error', data: { message: err.message } }));
+          }
+          break;
+
         case 'switch_chat':
           if (agentEngine.isRunning) {
             ws.send(JSON.stringify({
@@ -381,10 +407,13 @@ wss.on('connection', (ws) => {
             agentEngine.currentSessionId = loaded.id;
             agentEngine.messages = loaded.messages || [];
             agentEngine.uiMessages = loaded.uiMessages || [];
-            agentEngine.mode = loaded.mode || 'agent';
+            const chatMode = loaded.mode || 'agent';
+            agentEngine.mode = chatMode;
             agentEngine.activePlan = loaded.activePlan || null;
             agentEngine.activeCanvas = loaded.activeCanvas || null;
             broadcast('chat_switched', { chat: loaded });
+            broadcast('mode_updated', { mode: chatMode });
+            agentEngine.emitContextStats();
           }
           break;
 
@@ -396,9 +425,27 @@ wss.on('connection', (ws) => {
             }));
             break;
           }
+
+          const chosenMode = payload?.mode || agentEngine.mode || 'agent';
+          agentEngine.mode = chosenMode;
+
+          if (payload?.withSummary) {
+            try {
+              const branchedChat = agentEngine.createBranchWithSummary(payload?.baseChatId);
+              branchedChat.mode = chosenMode;
+              broadcast('chat_created', { chat: branchedChat });
+              broadcast('mode_updated', { mode: chosenMode });
+            } catch (err) {
+              ws.send(JSON.stringify({ event: 'error', data: { message: err.message } }));
+            }
+            break;
+          }
+
+          const defaultTitle = chosenMode === 'system' ? 'System Diagnostic Session' : 'New Conversation';
           const newChat = sessionStore.createSession({
+            title: payload?.title || defaultTitle,
             model: agentEngine.model,
-            mode: agentEngine.mode
+            mode: chosenMode
           });
           agentEngine.currentSessionId = newChat.id;
           agentEngine.messages = [];
@@ -406,6 +453,8 @@ wss.on('connection', (ws) => {
           agentEngine.activePlan = null;
           agentEngine.activeCanvas = null;
           broadcast('chat_created', { chat: newChat });
+          broadcast('mode_updated', { mode: chosenMode });
+          agentEngine.emitContextStats();
           break;
 
         case 'set_workspace':

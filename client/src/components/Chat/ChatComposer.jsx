@@ -366,7 +366,7 @@ export default function ChatComposer() {
 
       <div className="flex items-center justify-between mt-2 px-1 text-[11px] text-slate-500 select-none">
         <span className="flex items-center gap-1">
-          <span>Supports images &amp; videos • Paste with Ctrl+V</span>
+          <span>Supports images &amp; videos • Paste with Ctrl+V • New Chat: <kbd className="px-1 py-0.2 bg-slate-900 border border-slate-800 rounded font-mono text-[10px] text-slate-400">Ctrl+Shift+N</kbd></span>
         </span>
         <span>OpenRouter Multimodal Engine</span>
       </div>

@@ -30,12 +30,15 @@ export class SessionStore {
         try {
           const raw = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf8');
           const data = JSON.parse(raw);
+          const rawLength = raw.length;
+          const estTokens = data.estimatedTokens || Math.max(10, Math.ceil(rawLength / 3.5));
           sessions.push({
             id: data.id || file.replace('.json', ''),
             title: data.title || 'Untitled Conversation',
             createdAt: data.createdAt || Date.now(),
             updatedAt: data.updatedAt || Date.now(),
-            messageCount: data.messages ? data.messages.length : 0,
+            messageCount: data.uiMessages ? data.uiMessages.length : (data.messages ? data.messages.length : 0),
+            estimatedTokens: estTokens,
             model: data.model || '',
             mode: data.mode || 'agent'
           });
@@ -114,11 +117,13 @@ export class SessionStore {
       model: initialData.model || 'anthropic/claude-3.7-sonnet',
       mode: initialData.mode || 'agent',
       messages: initialData.messages || [],
-      activePlan: null,
-      activeCanvas: null
+      uiMessages: initialData.uiMessages || [],
+      activePlan: initialData.activePlan || null,
+      activeCanvas: initialData.activeCanvas || null
     };
 
     this.saveSession(session);
     return session;
   }
 }
+

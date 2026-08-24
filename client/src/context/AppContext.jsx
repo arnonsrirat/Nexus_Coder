@@ -23,6 +23,7 @@ export function AppProvider({ children }) {
   const [autoApprove, setAutoApprove] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
+  const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState([]);
   const [appVersion, setAppVersion] = useState('');
   const [theme, setThemeState] = useState(() => {
@@ -73,6 +74,16 @@ export function AppProvider({ children }) {
   const [chatSessions, setChatSessions] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [currentChatTitle, setCurrentChatTitle] = useState('New Conversation');
+  const [contextStats, setContextStats] = useState({
+    estimatedTokens: 0,
+    contextLimit: 200000,
+    percent: 0,
+    isHigh: false,
+    isCritical: false,
+    model: 'anthropic/claude-3.7-sonnet',
+    messageCount: 0,
+    uiMessageCount: 0
+  });
 
   // Throttled streaming buffer for lag-free rendering.
   // Tokens arrive far faster than the screen can paint, so chunks are collected
@@ -308,6 +319,8 @@ export function AppProvider({ children }) {
             setActiveCanvas(data.activeCanvas || null);
             if (data.activePlan || data.activeCanvas) setIsCanvasOpen(true);
 
+            if (data.contextStats) setContextStats(data.contextStats);
+
             if (data.isPausedForInput && data.pendingAction) {
               setPendingPrompt(data.pendingAction);
               setAgentStatus('waiting_input');
@@ -316,6 +329,14 @@ export function AppProvider({ children }) {
             } else {
               setAgentStatus('idle');
             }
+            break;
+
+          case 'context_stats_updated':
+            if (data) setContextStats(data);
+            break;
+
+          case 'context_compacted':
+            if (data?.stats) setContextStats(data.stats);
             break;
 
           case 'agent_resumed':
@@ -769,6 +790,18 @@ export function AppProvider({ children }) {
     }
   }, [workspaceRoot, refreshTree]);
 
+  // Global Keyboard Shortcut: Ctrl+Shift+N or Cmd+Shift+N to create a new chat
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+        e.preventDefault();
+        createNewChat({ withSummary: false });
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [createNewChat]);
+
   // Actions
   const sendMessage = (text, attachedFiles = [], media = []) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -913,10 +946,25 @@ export function AppProvider({ children }) {
     }));
   };
 
-  const createNewChat = () => {
+  const createNewChat = useCallback(({ mode = null, withSummary = false, baseChatId = null, title = null } = {}) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: 'new_chat' }));
-  };
+    const targetMode = mode || (agentMode === 'system' ? 'system' : 'agent');
+    if (mode) setAgentMode(mode);
+    wsRef.current.send(JSON.stringify({
+      type: 'new_chat',
+      payload: {
+        mode: targetMode,
+        title: title,
+        withSummary: !!withSummary,
+        baseChatId: baseChatId || currentChatId
+      }
+    }));
+  }, [agentMode, currentChatId]);
+
+  const compactCurrentContext = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'compact_context' }));
+  }, []);
 
   const renameChatSession = async (chatId, title) => {
     try {
@@ -1146,6 +1194,7 @@ export function AppProvider({ children }) {
     clearChat,
     switchChat,
     createNewChat,
+    compactCurrentContext,
     renameChatSession,
     deleteChatSession,
     runTerminalCommand,
@@ -1192,6 +1241,8 @@ export function AppProvider({ children }) {
     setIsSettingsOpen,
     isFolderPickerOpen,
     setIsFolderPickerOpen,
+    isNewSessionModalOpen,
+    setIsNewSessionModalOpen,
     recentWorkspaces,
     appVersion,
     theme,
@@ -1229,10 +1280,11 @@ export function AppProvider({ children }) {
     isAgentBusy,
     pendingPrompt,
 
-    // Chat Sessions History
+    // Chat Sessions History & Context Stats
     chatSessions,
     currentChatId,
     currentChatTitle,
+    contextStats,
 
     // Canvas & Visual Plan
     isCanvasOpen,
@@ -1263,7 +1315,7 @@ export function AppProvider({ children }) {
 
     ...actions
   }), [
-    hasApiKey, model, models, autoApprove, isSettingsOpen, isFolderPickerOpen,
+    hasApiKey, model, models, autoApprove, isSettingsOpen, isFolderPickerOpen, isNewSessionModalOpen,
     recentWorkspaces, appVersion, theme,
     panelSizes, panelOrder, panelVisibility, resizePanel, resetPanel,
     resetAllPanels, togglePanelVisibility, setPanelVisibility, movePanel,
@@ -1271,7 +1323,7 @@ export function AppProvider({ children }) {
     workspaceRoot, workspaceName, fileTree, activeTabs, activeTabPath,
     pinnedContextFiles, fileDiffs, activeDiff,
     agentMode, reasoningEffort, messages, agentStatus, isAgentBusy, pendingPrompt,
-    chatSessions, currentChatId, currentChatTitle,
+    chatSessions, currentChatId, currentChatTitle, contextStats,
     isCanvasOpen, activePlan, activeCanvas, canvasViewMode,
     terminalOpen, terminalLogs,
     updateStatus, updateInfo, updateProgress, isUpdateModalOpen, updateRepo,

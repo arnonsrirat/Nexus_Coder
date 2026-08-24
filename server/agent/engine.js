@@ -101,6 +101,45 @@ function isRetryableError(err) {
   );
 }
 
+export function getModelContextLimit(modelId = '') {
+  const id = String(modelId || '').toLowerCase();
+  if (id.includes('gemini-2') || id.includes('gemini-1.5')) return 1000000;
+  if (id.includes('claude-3-7') || id.includes('claude-3.7') || id.includes('claude-3-5') || id.includes('claude-3.5')) return 200000;
+  if (id.includes('gpt-4o') || id.includes('o1') || id.includes('o3') || id.includes('deepseek') || id.includes('qwen') || id.includes('llama-3.3')) return 128000;
+  if (id.includes('claude-3-haiku') || id.includes('gpt-4-turbo')) return 128000;
+  return 128000;
+}
+
+export function estimateTokens(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return 0;
+  let totalChars = 0;
+  for (const m of messages) {
+    if (!m) continue;
+    if (typeof m.content === 'string') {
+      totalChars += m.content.length;
+    } else if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (!part) continue;
+        if (typeof part === 'string') {
+          totalChars += part.length;
+        } else if (part.text) {
+          totalChars += part.text.length;
+        } else if (part.type === 'image_url') {
+          totalChars += 1600;
+        } else if (part.type === 'video_url') {
+          totalChars += 3200;
+        }
+      }
+    }
+    if (Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        totalChars += (tc?.function?.name?.length || 0) + (tc?.function?.arguments?.length || 0);
+      }
+    }
+  }
+  return Math.max(1, Math.ceil(totalChars / 3.5) + (messages.length * 4));
+}
+
 function sleep(ms, signal) {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -213,6 +252,168 @@ export class AgentEngine {
     return text.trim().slice(0, 45) || 'New Conversation';
   }
 
+  getContextStats() {
+    const estimatedTokens = estimateTokens(this.messages);
+    const contextLimit = getModelContextLimit(this.model);
+    const percent = Math.min(100, Math.round((estimatedTokens / contextLimit) * 100));
+    return {
+      estimatedTokens,
+      contextLimit,
+      percent,
+      isHigh: percent >= 75,
+      isCritical: percent >= 90,
+      model: this.model,
+      messageCount: this.messages.length,
+      uiMessageCount: this.uiMessages.length
+    };
+  }
+
+  emitContextStats() {
+    this.emit('context_stats_updated', this.getContextStats());
+  }
+
+  compactContext({ force = false } = {}) {
+    if (!Array.isArray(this.messages) || this.messages.length <= 3) {
+      return { compacted: false, reason: 'Session context is already minimal', stats: this.getContextStats() };
+    }
+
+    const beforeTokens = estimateTokens(this.messages);
+    // Keep system prompt (index 0) and the last 4 messages untouched
+    const keepLastCount = 4;
+    const cutoffIndex = Math.max(1, this.messages.length - keepLastCount);
+
+    let compactedCount = 0;
+
+    for (let i = 1; i < cutoffIndex; i++) {
+      const m = this.messages[i];
+      if (!m) continue;
+
+      // 1. Prune large tool outputs (> 250 chars)
+      if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > 250) {
+        const snippet = m.content.slice(0, 120).replace(/[\r\n]+/g, ' ');
+        m.content = JSON.stringify({
+          status: 'success',
+          note: `[Output of earlier tool "${m.name || 'action'}" compacted to conserve context]`,
+          preview: `${snippet}...`
+        });
+        compactedCount++;
+      }
+
+      // 2. Prune old attached files context in user messages
+      if (m.role === 'user' && typeof m.content === 'string' && m.content.includes('### Attached Files Context:')) {
+        const parts = m.content.split('### Attached Files Context:');
+        m.content = `${parts[0].trim()}\n\n[Earlier attached files context omitted to save context space]`;
+        compactedCount++;
+      }
+
+      // 3. Prune old very long assistant text (> 1200 chars)
+      if (m.role === 'assistant' && typeof m.content === 'string' && m.content.length > 1200) {
+        m.content = m.content.slice(0, 800) + '\n\n[...earlier response truncated in context memory...]';
+        compactedCount++;
+      }
+    }
+
+    const afterTokens = estimateTokens(this.messages);
+    this.saveCurrentSession();
+
+    const stats = this.getContextStats();
+    this.emit('context_compacted', {
+      beforeTokens,
+      afterTokens,
+      savedTokens: Math.max(0, beforeTokens - afterTokens),
+      compactedMessages: compactedCount,
+      stats
+    });
+    this.emit('context_stats_updated', stats);
+
+    return {
+      compacted: true,
+      beforeTokens,
+      afterTokens,
+      savedTokens: Math.max(0, beforeTokens - afterTokens),
+      stats
+    };
+  }
+
+  createBranchWithSummary(baseChatId = null) {
+    const targetChatId = baseChatId || this.currentSessionId;
+    let sourceSession = null;
+    if (this.sessionStore && targetChatId) {
+      sourceSession = this.sessionStore.getSession(targetChatId);
+    }
+    if (!sourceSession && targetChatId === this.currentSessionId) {
+      sourceSession = {
+        title: this.deriveTitle(),
+        mode: this.mode,
+        model: this.model,
+        activePlan: this.activePlan,
+        messages: this.messages,
+        uiMessages: this.uiMessages
+      };
+    }
+
+    const sourceTitle = sourceSession?.title || 'Previous Conversation';
+    let summaryContent = `Continuing work from session: **${sourceTitle}**\n\n`;
+
+    if (sourceSession?.activePlan?.steps && sourceSession.activePlan.steps.length > 0) {
+      const plan = sourceSession.activePlan;
+      summaryContent += `### Current Active Plan (${plan.title || 'Implementation Plan'}):\n`;
+      if (plan.summary) summaryContent += `${plan.summary}\n\n`;
+      summaryContent += `Checklist Steps:\n`;
+      plan.steps.forEach((s, idx) => {
+        const check = s.status === 'completed' ? '[x]' : s.status === 'in_progress' ? '[-]' : '[ ]';
+        summaryContent += `- ${check} ${s.title || `Step ${idx + 1}`}\n`;
+      });
+      summaryContent += '\n';
+    }
+
+    const recentUi = (sourceSession?.uiMessages || []).slice(-4);
+    if (recentUi.length > 0) {
+      summaryContent += `### Recent Context & User Request:\n`;
+      recentUi.forEach(m => {
+        const role = m.role === 'user' ? 'User' : 'Assistant';
+        const txt = (m.displayContent || m.content || '').slice(0, 250);
+        if (txt) summaryContent += `- **${role}**: ${txt.replace(/\n+/g, ' ')}\n`;
+      });
+      summaryContent += '\n';
+    }
+
+    const newTitle = `Continuation: ${sourceTitle.replace(/^Continuation:\s*/, '').slice(0, 30)}`;
+    const newChat = this.sessionStore.createSession({
+      title: newTitle,
+      model: sourceSession?.model || this.model,
+      mode: sourceSession?.mode || this.mode,
+      activePlan: sourceSession?.activePlan || null
+    });
+
+    this.currentSessionId = newChat.id;
+    this.messages = [];
+    this.uiMessages = [];
+    this.activePlan = sourceSession?.activePlan || null;
+    this.activeCanvas = null;
+
+    const initialUserMsg = {
+      id: `msg_${Date.now()}_branch_context`,
+      role: 'user',
+      content: `[Branch Continuation Context]\n${summaryContent}\nPlease proceed with the next steps from this plan or task.`,
+      displayContent: `🌿 **Branch Continuation from "${sourceTitle}"**\n\n${summaryContent}`,
+      isContinuationSummary: true,
+      timestamp: Date.now()
+    };
+
+    this.addUiMessage(initialUserMsg);
+    this.messages.push({
+      role: 'user',
+      content: initialUserMsg.content
+    });
+
+    this.saveCurrentSession();
+    this.emit('chat_created', { chat: newChat });
+    this.emitContextStats();
+
+    return newChat;
+  }
+
   saveCurrentSession() {
     if (!this.sessionStore) return;
 
@@ -232,6 +433,7 @@ export class AgentEngine {
     session.model = this.model;
     session.activePlan = this.activePlan;
     session.activeCanvas = this.activeCanvas;
+    session.estimatedTokens = estimateTokens(this.messages);
 
     if (!session.title || session.title === 'New Conversation' || session.title === 'Untitled Conversation') {
       session.title = this.deriveTitle();
@@ -239,6 +441,7 @@ export class AgentEngine {
 
     this.sessionStore.saveSession(session);
     this.emit('sessions_updated', {});
+    this.emitContextStats();
   }
 
   setApiKey(key) {
@@ -247,6 +450,7 @@ export class AgentEngine {
 
   setModel(model) {
     this.model = model;
+    this.emitContextStats();
   }
 
   setMode(mode) {
@@ -298,6 +502,7 @@ export class AgentEngine {
     this.pendingAction = null;
     this.isPausedForInput = false;
     this.emit('history_cleared', {});
+    this.emitContextStats();
   }
 
   stop() {
@@ -600,8 +805,11 @@ export class AgentEngine {
 
         this.emit('stream_start', { messageId: assistantMsgId });
 
-        let response = null;
-        let lastError = null;
+        // Auto-compact context if it is reaching model capacity (>= 80%)
+        const currentStats = this.getContextStats();
+        if (currentStats.percent >= 80) {
+          this.compactContext();
+        }
 
         // Retry transient upstream failures instead of ending the whole run.
         for (let attempt = 0; attempt <= this.maxStreamRetries; attempt++) {

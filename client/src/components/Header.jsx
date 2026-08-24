@@ -16,7 +16,8 @@ import {
   LayoutGrid,
   RotateCcw,
   Code2,
-  Bot
+  Bot,
+  Monitor
 } from 'lucide-react';
 
 export default function Header() {
@@ -29,6 +30,7 @@ export default function Header() {
     models,
     saveSettings,
     agentStatus,
+    agentMode,
     autoApprove,
     terminalOpen,
     setTerminalOpen,
@@ -116,17 +118,29 @@ export default function Header() {
           </div>
         </div>
 
-        {/* Workspace Folder Button */}
-        <button
-          onClick={() => setIsFolderPickerOpen(true)}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-700/60 hover:border-cyan-500/50 transition-all text-xs group max-w-[280px]"
-          title={workspaceRoot || 'Click to select project folder'}
-        >
-          <Folder className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform flex-shrink-0" />
-          <span className="truncate font-mono text-slate-200">
-            {workspaceName || 'Select Project Folder...'}
-          </span>
-        </button>
+        {/* Workspace Folder Button or Host System Indicator */}
+        {agentMode === 'system' ? (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/70 border border-amber-500/50 text-xs shadow-sm shadow-amber-950/40 max-w-[280px]"
+            title="System Agent operates across the entire host machine (No project folder required)"
+          >
+            <Monitor className="w-3.5 h-3.5 text-amber-400 animate-pulse flex-shrink-0" />
+            <span className="truncate font-semibold text-amber-200">
+              Host System (Entire Machine)
+            </span>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsFolderPickerOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-700/60 hover:border-cyan-500/50 transition-all text-xs group max-w-[280px]"
+            title={workspaceRoot || 'Click to select project folder'}
+          >
+            <Folder className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform flex-shrink-0" />
+            <span className="truncate font-mono text-slate-200">
+              {workspaceName || 'Select Project Folder...'}
+            </span>
+          </button>
+        )}
 
         {/* Status Indicator */}
         {getStatusBadge()}

@@ -92,6 +92,31 @@ export async function createChat(data = {}) {
   return res.json();
 }
 
+export async function branchChat(baseChatId = null) {
+  const res = await fetch(`${API_BASE}/chats/branch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseChatId })
+  });
+  if (!res.ok) throw new Error('Failed to branch chat');
+  return res.json();
+}
+
+export async function compactContext() {
+  const res = await fetch(`${API_BASE}/chats/compact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) throw new Error('Failed to compact context');
+  return res.json();
+}
+
+export async function fetchContextStats() {
+  const res = await fetch(`${API_BASE}/chats/context-stats`);
+  if (!res.ok) throw new Error('Failed to fetch context stats');
+  return res.json();
+}
+
 export async function renameChat(id, title) {
   const res = await fetch(`${API_BASE}/chats/${id}/rename`, {
     method: 'POST',

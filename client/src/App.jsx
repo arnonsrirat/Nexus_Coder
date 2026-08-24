@@ -10,6 +10,7 @@ import CanvasPanel from './components/Canvas/CanvasPanel';
 import SettingsModal from './components/Modals/SettingsModal';
 import FolderPickerModal from './components/Modals/FolderPickerModal';
 import UpdateModal from './components/Modals/UpdateModal';
+import NewSessionModal from './components/Modals/NewSessionModal';
 import ResizeHandle from './components/ResizeHandle';
 import {
   Folder,
@@ -289,6 +290,7 @@ export default function App() {
       <SettingsModal />
       <FolderPickerModal />
       <UpdateModal />
+      <NewSessionModal />
     </div>
   );
 }

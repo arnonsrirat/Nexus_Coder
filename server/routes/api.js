@@ -273,8 +273,38 @@ export function createApiRouter(agentEngine, configStore, appVersion = '0.0.0', 
 
   router.post('/chats/new', (req, res) => {
     try {
+      if (req.body.withSummary) {
+        const session = agentEngine.createBranchWithSummary(req.body.baseChatId);
+        return res.json({ success: true, chat: session });
+      }
       const session = agentEngine.sessionStore ? agentEngine.sessionStore.createSession(req.body) : { id: `chat_${Date.now()}` };
       res.json({ success: true, chat: session });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post('/chats/branch', (req, res) => {
+    try {
+      const session = agentEngine.createBranchWithSummary(req.body.baseChatId);
+      res.json({ success: true, chat: session });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post('/chats/compact', (req, res) => {
+    try {
+      const result = agentEngine.compactContext({ force: true });
+      res.json({ success: true, ...result });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get('/chats/context-stats', (req, res) => {
+    try {
+      res.json({ stats: agentEngine.getContextStats() });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
