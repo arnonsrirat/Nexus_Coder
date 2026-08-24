@@ -1,12 +1,30 @@
-# 🚀 NexusCoder Studio — Release Notes v1.0.26 (Chat Delete Fix)
+# 🚀 NexusCoder Studio — Release Notes v1.0.30 (System Agent Crash Fix)
 
 **วันที่อัปเดต:** 24 สิงหาคม 2026  
-**เวอร์ชัน:** `1.0.26`  
+**เวอร์ชัน:** `1.0.30`  
 **สถานะการ Build:** ✅ สำเร็จ (Windows x64 — Custom Installer + Portable Executable, เซ็นใบรับรองครบ)
 
 ---
 
-## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.26
+## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.30
+
+### 1. 💥 แก้ System Agent ค้าง error `lastError is not defined` ทันทีที่เริ่มคุย
+* **สาเหตุ:** ใน `runLoop()` ตัวแปร `response` และ `lastError` ถูกใช้งาน (assign/read) โดยไม่เคยประกาศด้วย `let`/`const` เลย ปกติ JS จะสร้างเป็น global ตัวแปรให้เฉย ๆ แต่ไฟล์นี้เป็น ES module ซึ่งบังคับ strict mode เสมอ — การ assign ตัวแปรที่ไม่ได้ประกาศใน strict mode จะ throw `ReferenceError` ทันที
+* **ผลกระทบก่อนแก้:** พอ AI ตอบกลับมาปกติ (สำเร็จ) โค้ดพยายาม assign `response = ...` ก็ throw `ReferenceError: response is not defined` เข้า catch block ทันที แล้วในนั้นพยายาม assign `lastError = err` ก็ throw ซ้ำอีกที `ReferenceError: lastError is not defined` — Error ตัวที่ 2 นี่แหละที่หลุดออกมาโชว์ในหน้าแชท ทำให้ **System Agent ใช้งานไม่ได้เลยแม้แต่คำถามแรก**
+* **แก้ไข:** ประกาศ `let response = null;` และ `let lastError = null;` ให้ถูกต้องในขอบเขตของแต่ละรอบ iteration ของ `runLoop()` (`server/agent/engine.js`)
+
+---
+
+## 📄 สรุปจาก v1.0.27 – v1.0.29
+
+* v1.0.28: เพิ่มระบบ Context Management, Smart Compaction และแยก Session ระหว่าง Code Agent กับ System Agent
+* v1.0.29: แก้ TDZ `ReferenceError` ของ `createNewChat` ใน `AppContext`
+
+เวอร์ชันเหล่านี้ไม่มีไฟล์ release notes แยกตอนออก รายละเอียดเต็มดูได้จากประวัติ git (`git log`)
+
+---
+
+## 🛠️ (เดิม) รายการปรับปรุงและแก้บั๊กใน v1.0.26
 
 ### 1. 🗑️ แก้ลบประวัติแชทไม่ได้ (ลบแล้วยังค้างอยู่)
 * **สาเหตุที่ 1:** เซิร์ฟเวอร์ตอบกลับ HTTP 200 พร้อม `{success: false}` เวลาลบไม่สำเร็จ (เช่น ไฟล์โดน Windows ล็อกชั่วขณะระหว่างระบบ auto-save กำลังเขียนไฟล์นั้นอยู่พอดี) แต่ client เช็คแค่ HTTP status ไม่เคยเช็ค `success` field เลย เลยคิดว่าลบสำเร็จเสมอทั้งที่ไฟล์ยังอยู่

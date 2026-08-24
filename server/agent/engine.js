@@ -795,6 +795,8 @@ export class AgentEngine {
         let currentReasoningText = '';
         let hasEmittedGeneratingProgress = false;
         let hasEmittedReasoningProgress = false;
+        let response = null;
+        let lastError = null;
 
         this.emit('agent_progress', {
           phase: 'thinking',
