@@ -208,7 +208,24 @@ export class OpenRouterClient {
           errorMsg = `HTTP ${response.status}: ${parsed.error.message}`;
         }
       } catch (e) {}
-      throw new Error(errorMsg);
+      const apiError = new Error(errorMsg);
+      // 429s tell us exactly how long to back off via Retry-After (seconds,
+      // sometimes an HTTP date). Surface it so the caller can wait the actual
+      // required time instead of a fixed guess that may be too short for the
+      // provider's rate-limit window to clear.
+      const retryAfterHeader = response.headers.get('retry-after');
+      if (retryAfterHeader) {
+        const asSeconds = Number(retryAfterHeader);
+        if (Number.isFinite(asSeconds)) {
+          apiError.retryAfterMs = Math.max(0, asSeconds * 1000);
+        } else {
+          const asDate = Date.parse(retryAfterHeader);
+          if (!Number.isNaN(asDate)) {
+            apiError.retryAfterMs = Math.max(0, asDate - Date.now());
+          }
+        }
+      }
+      throw apiError;
     }
 
     const reader = response.body.getReader();

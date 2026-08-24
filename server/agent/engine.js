@@ -861,7 +861,12 @@ export class AgentEngine {
             lastError = err;
             if (!isRetryableError(err) || attempt === this.maxStreamRetries) break;
 
-            const waitMs = Math.min(1000 * Math.pow(2, attempt), 15000);
+            // Prefer the provider's own Retry-After (429s especially) over a
+            // fixed exponential guess - a rate-limit window can easily outlast
+            // the 15s backoff cap, which was giving up mid-window every time.
+            const waitMs = Number.isFinite(err?.retryAfterMs)
+              ? Math.min(Math.max(err.retryAfterMs, 1000), 60000)
+              : Math.min(1000 * Math.pow(2, attempt), 15000);
             this.emit('stream_retry', {
               messageId: assistantMsgId,
               attempt: attempt + 1,

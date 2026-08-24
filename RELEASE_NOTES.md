@@ -1,12 +1,21 @@
-# 🚀 NexusCoder Studio — Release Notes v1.0.30 (System Agent Crash Fix)
+# 🚀 NexusCoder Studio — Release Notes v1.0.31 (Agent 429 Rate-Limit Fix)
 
-**วันที่อัปเดต:** 24 สิงหาคม 2026  
-**เวอร์ชัน:** `1.0.30`  
+**วันที่อัปเดต:** 25 สิงหาคม 2026  
+**เวอร์ชัน:** `1.0.31`  
 **สถานะการ Build:** ✅ สำเร็จ (Windows x64 — Custom Installer + Portable Executable, เซ็นใบรับรองครบ)
 
 ---
 
-## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.30
+## 🛠️ รายการปรับปรุงและแก้บั๊กใน v1.0.31
+
+### 1. 🚦 แก้ Agent Mode ค้าง `HTTP 429 (gave up after 5 retries)` ทั้งที่ Plan/Ask ใช้งานได้ปกติ
+* **สาเหตุที่ 1 (ทำไมเกิดเฉพาะ Agent):** โหมด Agent วนลูป `runLoop()` เรียก API ต่อเนื่องได้ถึง 300 รอบโดยไม่มีการหน่วงเวลาระหว่างรอบเลย — พอ tool ทำงานเสร็จ (อ่านไฟล์, รันคำสั่ง ฯลฯ) ก็ยิง request ถัดไปทันที จึงยิงรัวจนชน rate limit ของ OpenRouter ได้ง่าย ต่างจากโหมด Plan/Ask ที่ใช้ tool น้อยกว่าและไม่ auto-continue ตัวเอง (ตอบจบแล้วหยุด)
+* **สาเหตุที่ 2 (ทำไม retry ไม่ช่วย):** ตัว retry เดิมใน `openrouter.js`/`engine.js` รอแบบ exponential backoff ตายตัว สูงสุดแค่ ~15 วินาที/ครั้ง รวม 5 ครั้งได้ราว ~30 วินาที และไม่เคยอ่าน header `Retry-After` ที่ OpenRouter ส่งกลับมาบอกเวลาที่ต้องรอจริง — ถ้า rate-limit window ยังไม่หมดก็ยอมแพ้ก่อน
+* **แก้ไข:** `openrouter.js` อ่าน header `retry-after` จาก response ตอน error แล้วแนบเป็น `err.retryAfterMs`; `engine.js` ใช้ค่านี้เป็นเวลารอจริงตอน retry (จำกัดไว้ 1-60 วินาที) แทนการเดาแบบตายตัว ทำให้รอครบ rate-limit window ก่อนลองใหม่จริง ๆ
+
+---
+
+## 🛠️ (เดิม) รายการปรับปรุงและแก้บั๊กใน v1.0.30
 
 ### 1. 💥 แก้ System Agent ค้าง error `lastError is not defined` ทันทีที่เริ่มคุย
 * **สาเหตุ:** ใน `runLoop()` ตัวแปร `response` และ `lastError` ถูกใช้งาน (assign/read) โดยไม่เคยประกาศด้วย `let`/`const` เลย ปกติ JS จะสร้างเป็น global ตัวแปรให้เฉย ๆ แต่ไฟล์นี้เป็น ES module ซึ่งบังคับ strict mode เสมอ — การ assign ตัวแปรที่ไม่ได้ประกาศใน strict mode จะ throw `ReferenceError` ทันที
