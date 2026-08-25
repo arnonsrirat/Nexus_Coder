@@ -139,6 +139,187 @@ When handling complex or multi-file programming tasks:
   }
 ];
 
+export const VALID_SKILL_ICONS = [
+  'ShieldCheck',
+  'Database',
+  'Palette',
+  'CheckCircle2',
+  'Zap',
+  'Network',
+  'BookOpen',
+  'Bot',
+  'Sparkles',
+  'Code2'
+];
+
+/**
+ * Parses markdown with YAML frontmatter or markdown headers into a standardized skill object.
+ */
+export function parseSkillMarkdown(markdownContent = '', defaultName = 'Imported Skill') {
+  if (typeof markdownContent !== 'string') return null;
+
+  let raw = markdownContent.trim();
+  let name = '';
+  let description = '';
+  let slashCommand = '';
+  let icon = 'Sparkles';
+  let tags = [];
+  let enabled = true;
+  let prompt = '';
+
+  // Check for YAML Frontmatter (--- ... ---)
+  const frontmatterMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (frontmatterMatch) {
+    const yamlBlock = frontmatterMatch[1];
+    prompt = frontmatterMatch[2].trim();
+
+    const lines = yamlBlock.split(/\r?\n/);
+    let currentKey = null;
+    let listItems = [];
+
+    for (let line of lines) {
+      line = line.trim();
+      if (!line || line.startsWith('#')) continue;
+
+      if (line.startsWith('-') && currentKey) {
+        const val = line.substring(1).trim().replace(/^['"]|['"]$/g, '');
+        if (val) listItems.push(val);
+        continue;
+      }
+
+      if (currentKey && listItems.length > 0) {
+        if (currentKey === 'tags' || currentKey === 'categories') {
+          tags = [...listItems];
+        }
+        listItems = [];
+        currentKey = null;
+      }
+
+      const colonIdx = line.indexOf(':');
+      if (colonIdx !== -1) {
+        const key = line.substring(0, colonIdx).trim().toLowerCase();
+        let value = line.substring(colonIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+
+        if (key === 'name' || key === 'title') {
+          name = value;
+        } else if (key === 'description' || key === 'desc' || key === 'summary') {
+          description = value;
+        } else if (key === 'slashcommand' || key === 'slash_command' || key === 'slash' || key === 'command') {
+          slashCommand = value;
+        } else if (key === 'icon') {
+          icon = value || 'Sparkles';
+        } else if (key === 'enabled') {
+          enabled = value.toLowerCase() !== 'false';
+        } else if (key === 'tags' || key === 'tag' || key === 'categories') {
+          if (value.startsWith('[') && value.endsWith(']')) {
+            tags = value.slice(1, -1).split(',').map(t => t.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+          } else if (value) {
+            tags = value.split(',').map(t => t.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+          } else {
+            currentKey = key;
+            listItems = [];
+          }
+        }
+      }
+    }
+
+    if (currentKey && listItems.length > 0) {
+      if (currentKey === 'tags' || currentKey === 'categories') {
+        tags = [...listItems];
+      }
+    }
+  } else {
+    // Markdown Header & Structure Parsing
+    const lines = raw.split(/\r?\n/);
+    const bodyLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!name && line.startsWith('# ')) {
+        name = line.substring(2).trim();
+        continue;
+      }
+      if (!slashCommand && /^(\/|[sS]lash:?\s*\/|[cC]ommand:?\s*\/)/.test(line)) {
+        const match = line.match(/\/([a-zA-Z0-9_-]+)/);
+        if (match) slashCommand = '/' + match[1];
+        continue;
+      }
+      if (tags.length === 0 && /^[tT]ags?:/i.test(line)) {
+        const tagStr = line.replace(/^[tT]ags?:/i, '').trim();
+        tags = tagStr.replace(/^\[|\]$/g, '').split(',').map(t => t.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+        continue;
+      }
+      if (!description && (line.startsWith('> ') || /^[dD]escription:/i.test(line))) {
+        description = line.replace(/^>\s*|^[dD]escription:\s*/i, '').trim();
+        continue;
+      }
+      if (/^[iI]con:/i.test(line)) {
+        icon = line.replace(/^[iI]con:\s*/i, '').trim();
+        continue;
+      }
+      bodyLines.push(lines[i]);
+    }
+
+    prompt = bodyLines.join('\n').trim();
+  }
+
+  // Sanitization and defaults
+  if (!name) {
+    name = defaultName || 'Custom AI Skill';
+  }
+  if (!description) {
+    const firstLine = prompt.split(/\r?\n/).find(l => l.trim().length > 0 && !l.trim().startsWith('#'));
+    description = firstLine ? firstLine.substring(0, 140).trim() : `Specialized workflow for ${name}`;
+  }
+  if (!slashCommand) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').substring(0, 15);
+    slashCommand = slug ? `/${slug}` : '/skill';
+  } else if (!slashCommand.startsWith('/')) {
+    slashCommand = `/${slashCommand}`;
+  }
+
+  if (!VALID_SKILL_ICONS.includes(icon)) {
+    icon = 'Sparkles';
+  }
+
+  if (!prompt) {
+    prompt = raw;
+  }
+
+  return {
+    name,
+    description,
+    slashCommand,
+    icon,
+    tags,
+    prompt,
+    enabled
+  };
+}
+
+/**
+ * Formats a skill into standard Markdown with YAML frontmatter for export or sharing.
+ */
+export function skillToMarkdown(skill) {
+  if (!skill) return '';
+  const tagsList = Array.isArray(skill.tags) ? skill.tags : [];
+  const tagsStr = tagsList.length > 0
+    ? `tags:\n${tagsList.map(t => `  - ${t}`).join('\n')}`
+    : 'tags: []';
+
+  return `---
+name: ${skill.name}
+description: ${skill.description || ''}
+slashCommand: ${skill.slashCommand || ''}
+icon: ${skill.icon || 'Sparkles'}
+${tagsStr}
+enabled: ${skill.enabled !== false}
+---
+
+${skill.prompt || ''}
+`.trim();
+}
+
 export class SkillsManager extends EventEmitter {
   constructor() {
     super();
@@ -153,13 +334,11 @@ export class SkillsManager extends EventEmitter {
         const raw = fs.readFileSync(SKILLS_CONFIG_FILE, 'utf8');
         const data = JSON.parse(raw);
         if (Array.isArray(data.skills)) {
-          // Load stored skills
           for (const s of data.skills) {
             if (s && s.id) {
               this.skills.set(s.id, s);
             }
           }
-          // Ensure all built-in skills exist
           for (const b of DEFAULT_BUILTIN_SKILLS) {
             if (!this.skills.has(b.id)) {
               this.skills.set(b.id, { ...b });
@@ -172,7 +351,6 @@ export class SkillsManager extends EventEmitter {
       console.warn('Could not load skills config, initializing defaults:', e.message);
     }
 
-    // Default initialization
     this.resetToDefaults(false);
   }
 
@@ -229,7 +407,7 @@ export class SkillsManager extends EventEmitter {
       name: skillData.name.trim(),
       description: skillData.description || '',
       slashCommand: skillData.slashCommand ? (skillData.slashCommand.startsWith('/') ? skillData.slashCommand : `/${skillData.slashCommand}`) : '',
-      icon: skillData.icon || 'Sparkles',
+      icon: VALID_SKILL_ICONS.includes(skillData.icon) ? skillData.icon : 'Sparkles',
       tags: Array.isArray(skillData.tags) ? skillData.tags : [],
       prompt: skillData.prompt || '',
       enabled: skillData.enabled !== false,
@@ -240,6 +418,35 @@ export class SkillsManager extends EventEmitter {
     this.save();
     this.emitUpdate();
     return updatedSkill;
+  }
+
+  importFromMarkdown(markdownContent, filename = '') {
+    const fallbackName = filename ? filename.replace(/\.(md|markdown|txt)$/i, '') : 'Imported Skill';
+    const parsed = parseSkillMarkdown(markdownContent, fallbackName);
+    if (!parsed) {
+      throw new Error('Invalid markdown content for skill.');
+    }
+    return this.addOrUpdateSkill(parsed);
+  }
+
+  importMultipleFromMarkdown(items = []) {
+    const importedSkills = [];
+    for (const item of items) {
+      if (typeof item === 'string') {
+        const skill = this.importFromMarkdown(item);
+        if (skill) importedSkills.push(skill);
+      } else if (item && item.content) {
+        const skill = this.importFromMarkdown(item.content, item.filename || '');
+        if (skill) importedSkills.push(skill);
+      }
+    }
+    return importedSkills;
+  }
+
+  exportToMarkdown(id) {
+    const skill = this.getSkillById(id);
+    if (!skill) return null;
+    return skillToMarkdown(skill);
   }
 
   toggleSkill(id, enabledState = null) {
@@ -256,7 +463,6 @@ export class SkillsManager extends EventEmitter {
     const skill = this.skills.get(id);
     if (!skill) return false;
     if (skill.isBuiltin) {
-      // Just disable built-in skills rather than permanently destroying
       skill.enabled = false;
       this.save();
       this.emitUpdate();

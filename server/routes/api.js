@@ -520,6 +520,54 @@ export function createApiRouter(agentEngine, configStore, appVersion = '0.0.0', 
     res.json({ success });
   });
 
+  
+  router.post('/skills/import-md', (req, res) => {
+    if (!agentEngine.skillsManager) {
+      return res.status(500).json({ error: 'Skills Manager not initialized' });
+    }
+    try {
+      const { markdown, filename, path: filePath, skills: skillsList } = req.body;
+      if (Array.isArray(skillsList)) {
+        const imported = agentEngine.skillsManager.importMultipleFromMarkdown(skillsList);
+        return res.json({ success: true, imported, skills: agentEngine.skillsManager.getAllSkills() });
+      }
+
+      let content = markdown;
+      let name = filename || '';
+
+      if (!content && filePath) {
+        const target = path.resolve(agentEngine.workspaceRoot || os.homedir(), filePath);
+        if (fs.existsSync(target)) {
+          content = fs.readFileSync(target, 'utf8');
+          name = name || path.basename(target);
+        }
+      }
+
+      if (!content) {
+        return res.status(400).json({ error: 'No markdown content or valid file path provided' });
+      }
+
+      const skill = agentEngine.skillsManager.importFromMarkdown(content, name);
+      res.json({ success: true, skill, skills: agentEngine.skillsManager.getAllSkills() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/skills/:id/export-md', (req, res) => {
+    if (!agentEngine.skillsManager) {
+      return res.status(500).json({ error: 'Skills Manager not initialized' });
+    }
+    try {
+      const md = agentEngine.skillsManager.exportToMarkdown(req.params.id);
+      if (!md) return res.status(404).json({ error: 'Skill not found' });
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+      res.send(md);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/skills/reset-builtins', (req, res) => {
     if (!agentEngine.skillsManager) {
       return res.status(500).json({ error: 'Skills Manager not initialized' });

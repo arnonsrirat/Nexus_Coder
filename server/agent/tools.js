@@ -81,13 +81,13 @@ export const toolDefinitions = [
     type: 'function',
     function: {
       name: 'get_network_info',
-      description: 'Inspect network adapters, active connections, and listening ports on the host machine (e.g. check what services/processes are using port 3000, 8080, etc.).',
+      description: 'Get network configuration and active open ports / listening services on the host machine.',
       parameters: {
         type: 'object',
         properties: {
-          port: {
-            type: 'integer',
-            description: 'Optional port number to inspect (e.g. 3000, 8080, 5000).'
+          include_interfaces: {
+            type: 'boolean',
+            description: 'Include IP and MAC addresses of network adapters (default true).'
           },
           listening_only: {
             type: 'boolean',
@@ -319,6 +319,81 @@ export const toolDefinitions = [
         required: ['type', 'title', 'content']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_skill',
+      description: 'Create or register a new AI Skill / expert workflow. Use this tool when the user requests to create or add a skill, save custom prompt rules as a skill, or import custom instructions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Name of the skill (e.g. "React Query Master", "Docker & K8s Specialist").'
+          },
+          description: {
+            type: 'string',
+            description: 'Short summary of what this skill does.'
+          },
+          slashCommand: {
+            type: 'string',
+            description: 'Slash command trigger starting with "/" (e.g. "/rq", "/docker").'
+          },
+          prompt: {
+            type: 'string',
+            description: 'Detailed prompt instructions, guidelines, persona rules, and knowledge augmentation for the AI when this skill is active.'
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'List of tags for filtering (e.g. ["React", "State", "Frontend"]).'
+          },
+          icon: {
+            type: 'string',
+            enum: ['Sparkles', 'ShieldCheck', 'Database', 'Palette', 'CheckCircle2', 'Zap', 'Network', 'BookOpen', 'Bot', 'Code2'],
+            description: 'Icon identifier for UI display (default "Sparkles").'
+          },
+          enabled: {
+            type: 'boolean',
+            description: 'Whether to enable this skill immediately (default true).'
+          }
+        },
+        required: ['name', 'prompt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'import_skill_file',
+      description: 'Import an AI Skill from a markdown (.md) or text file located in the workspace or system.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Relative or absolute file path to the .md skill file.'
+          },
+          enabled: {
+            type: 'boolean',
+            description: 'Whether to enable the skill immediately upon importing (default true).'
+          }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_skills',
+      description: 'List all registered AI skills, active skills, and their slash commands.',
+      parameters: {
+        type: 'object',
+        properties: {}
+      }
+    }
   }
 ];
 
@@ -328,6 +403,7 @@ export class ToolExecutor {
     this.onApprovalRequest = options.onApprovalRequest || null;
     this.autoApprove = options.autoApprove || false;
     this.mcpManager = options.mcpManager || null;
+    this.skillsManager = options.skillsManager || null;
   }
 
   setWorkspaceRoot(root) {
@@ -339,6 +415,10 @@ export class ToolExecutor {
 
   setMcpManager(manager) {
     this.mcpManager = manager;
+  }
+
+  setSkillsManager(manager) {
+    this.skillsManager = manager;
   }
 
   async execute(toolName, args, onStatusUpdate = () => {}) {
@@ -411,12 +491,71 @@ export class ToolExecutor {
             message: `Canvas artifact '${args.title}' updated`,
             canvas: args
           };
+        case 'add_skill':
+          return await this.addSkill(args);
+        case 'import_skill_file':
+          return await this.importSkillFile(args);
+        case 'list_skills':
+          return await this.listSkills();
         default:
           return { error: `Unknown tool: ${toolName}` };
       }
     } catch (err) {
       return { error: err.message || String(err) };
     }
+  }
+
+  async addSkill(args) {
+    if (!this.skillsManager) {
+      return { error: 'Skills Manager is not initialized on the server.' };
+    }
+    const skill = this.skillsManager.addOrUpdateSkill(args);
+    return {
+      success: true,
+      message: `Skill "${skill.name}" successfully created and saved!`,
+      skill
+    };
+  }
+
+  async importSkillFile(args) {
+    if (!this.skillsManager) {
+      return { error: 'Skills Manager is not initialized on the server.' };
+    }
+    const filePath = resolveSafePath(this.workspaceRoot, args.path);
+    if (!fs.existsSync(filePath)) {
+      return { error: `Skill file not found at path: ${filePath}` };
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    const skill = this.skillsManager.importFromMarkdown(content, path.basename(filePath));
+    if (args.enabled !== undefined) {
+      this.skillsManager.toggleSkill(skill.id, !!args.enabled);
+    }
+    return {
+      success: true,
+      message: `Skill "${skill.name}" successfully imported from ${path.basename(filePath)}!`,
+      skill
+    };
+  }
+
+  async listSkills() {
+    if (!this.skillsManager) {
+      return { error: 'Skills Manager is not initialized on the server.' };
+    }
+    const all = this.skillsManager.getAllSkills();
+    const active = this.skillsManager.getActiveSkills();
+    return {
+      total: all.length,
+      activeCount: active.length,
+      skills: all.map(s => ({
+        id: s.id,
+        name: s.name,
+        slashCommand: s.slashCommand,
+        description: s.description,
+        tags: s.tags,
+        enabled: s.enabled,
+        isBuiltin: !!s.isBuiltin
+      }))
+    };
   }
 
   async getSystemInfo() {
@@ -438,81 +577,69 @@ export class ToolExecutor {
     const cpus = os.cpus() || [];
     const cpuModel = cpus[0]?.model?.trim() || 'Unknown CPU';
     const cpuCores = cpus.length;
-    const cpuSpeed = cpus[0]?.speed ? `${cpus[0].speed} MHz` : '';
-
-    // Calculate approximate CPU usage
-    let totalIdle = 0, totalTick = 0;
-    for (const cpu of cpus) {
-      for (const t in cpu.times) {
-        totalTick += cpu.times[t];
-      }
-      totalIdle += cpu.times.idle;
-    }
-    const cpuUsagePercent = totalTick > 0 ? (((totalTick - totalIdle) / totalTick) * 100).toFixed(1) : 'N/A';
 
     // Memory info
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
     const usedMem = totalMem - freeMem;
-    const totalMemGB = (totalMem / (1024 ** 3)).toFixed(2);
-    const freeMemGB = (freeMem / (1024 ** 3)).toFixed(2);
-    const usedMemGB = (usedMem / (1024 ** 3)).toFixed(2);
-    const memUsagePercent = ((usedMem / totalMem) * 100).toFixed(1);
+    const toGB = (bytes) => (bytes / (1024 * 1024 * 1024)).toFixed(2);
+    const toMB = (bytes) => (bytes / (1024 * 1024)).toFixed(0);
 
-    // Disk spaces
-    const disks = [];
-    if (platform === 'win32') {
-      const driveLetters = ['C', 'D', 'E', 'F', 'G', 'H', 'Z'];
-      for (const d of driveLetters) {
-        try {
-          const drivePath = `${d}:/`;
-          if (fs.existsSync(`${d}:\\`)) {
-            const stats = fs.statfsSync(drivePath);
-            const totalGB = Number((BigInt(stats.blocks) * BigInt(stats.bsize)) / BigInt(1024 ** 3));
-            const freeGB = Number((BigInt(stats.bavail) * BigInt(stats.bsize)) / BigInt(1024 ** 3));
-            const usedGB = totalGB - freeGB;
-            const pct = totalGB > 0 ? ((usedGB / totalGB) * 100).toFixed(1) : '0';
+    // Dynamic disk usage scan via platform commands
+    let disks = [];
+    try {
+      if (platform === 'win32') {
+        const stdout = await new Promise((res) => {
+          exec('wmic logicaldisk get Caption,FreeSpace,Size,VolumeName /format:csv', { timeout: 4000 }, (err, out) => {
+            res(out || '');
+          });
+        });
+        const lines = stdout.split('\r\n').filter(l => l.trim().length > 0);
+        for (let i = 1; i < lines.length; i++) {
+          const parts = lines[i].split(',').map(p => p.trim());
+          if (parts.length >= 4) {
+            const drive = parts[1];
+            const free = parseInt(parts[2], 10);
+            const total = parseInt(parts[3], 10);
+            const name = parts[4] || '';
+            if (drive && total > 0) {
+              const used = total - free;
+              disks.push({
+                drive,
+                name,
+                totalGB: (total / (1024 * 1024 * 1024)).toFixed(1) + ' GB',
+                freeGB: (free / (1024 * 1024 * 1024)).toFixed(1) + ' GB',
+                usedGB: (used / (1024 * 1024 * 1024)).toFixed(1) + ' GB',
+                usedPercent: ((used / total) * 100).toFixed(1) + '%'
+              });
+            }
+          }
+        }
+      } else {
+        const stdout = await new Promise((res) => {
+          exec('df -kP', { timeout: 4000 }, (err, out) => res(out || ''));
+        });
+        const lines = stdout.split('\n').filter(l => l.trim().length > 0);
+        for (let i = 1; i < lines.length; i++) {
+          const parts = lines[i].split(/\s+/);
+          if (parts.length >= 6 && parts[0].startsWith('/dev/')) {
+            const total = parseInt(parts[1], 10) * 1024;
+            const used = parseInt(parts[2], 10) * 1024;
+            const free = parseInt(parts[3], 10) * 1024;
+            const mount = parts[5];
             disks.push({
-              drive: `${d}:`,
-              totalGB: `${totalGB} GB`,
-              usedGB: `${usedGB} GB`,
-              freeGB: `${freeGB} GB`,
-              usedPercent: `${pct}%`
+              drive: parts[0],
+              mount,
+              totalGB: (total / (1024 * 1024 * 1024)).toFixed(1) + ' GB',
+              freeGB: (free / (1024 * 1024 * 1024)).toFixed(1) + ' GB',
+              usedGB: (used / (1024 * 1024 * 1024)).toFixed(1) + ' GB',
+              usedPercent: parts[4]
             });
           }
-        } catch (e) {}
-      }
-    } else {
-      try {
-        const stats = fs.statfsSync('/');
-        const totalGB = Number((BigInt(stats.blocks) * BigInt(stats.bsize)) / BigInt(1024 ** 3));
-        const freeGB = Number((BigInt(stats.bavail) * BigInt(stats.bsize)) / BigInt(1024 ** 3));
-        const usedGB = totalGB - freeGB;
-        const pct = totalGB > 0 ? ((usedGB / totalGB) * 100).toFixed(1) : '0';
-        disks.push({
-          mount: '/',
-          totalGB: `${totalGB} GB`,
-          usedGB: `${usedGB} GB`,
-          freeGB: `${freeGB} GB`,
-          usedPercent: `${pct}%`
-        });
-      } catch (e) {}
-    }
-
-    // Active network interfaces
-    const netInterfaces = os.networkInterfaces();
-    const activeNets = [];
-    for (const [name, addrs] of Object.entries(netInterfaces)) {
-      for (const addr of addrs || []) {
-        if (!addr.internal && addr.family === 'IPv4') {
-          activeNets.push({
-            interface: name,
-            address: addr.address,
-            netmask: addr.netmask,
-            mac: addr.mac
-          });
         }
       }
+    } catch (e) {
+      // Ignore disk error
     }
 
     return {
@@ -522,205 +649,207 @@ export class ToolExecutor {
         release,
         arch,
         hostname,
-        username: userInfo.username,
-        homeDir: userInfo.homedir,
-        tempDir: os.tmpdir(),
-        uptime: `${uptimeHours} hours`
+        username: userInfo.username || 'user',
+        homedir: userInfo.homedir || os.homedir()
       },
       cpu: {
         model: cpuModel,
         cores: cpuCores,
-        speed: cpuSpeed,
-        usageApprox: `${cpuUsagePercent}%`
+        speedMHz: cpus[0]?.speed || 0,
+        usageApprox: `${((1 - (freeMem / totalMem)) * 100).toFixed(1)}%`
       },
       memory: {
-        totalGB: `${totalMemGB} GB`,
-        usedGB: `${usedMemGB} GB`,
-        freeGB: `${freeMemGB} GB`,
-        usedPercent: `${memUsagePercent}%`
+        totalGB: `${toGB(totalMem)} GB`,
+        usedGB: `${toGB(usedMem)} GB`,
+        freeGB: `${toGB(freeMem)} GB`,
+        usedPercent: `${((usedMem / totalMem) * 100).toFixed(1)}%`
       },
       disks,
-      network: activeNets
+      uptime: `${uptimeHours} hours (${uptimeSec}s)`
     };
   }
 
-  async listProcesses({ search, sort_by = 'memory', limit = 25 }) {
+  async listProcesses({ search = '', sort_by = 'memory', limit = 25 } = {}) {
     const isWin = os.platform() === 'win32';
-    const maxItems = Math.min(Math.max(limit || 25, 1), 100);
+    const processes = [];
 
-    return new Promise((resolve) => {
+    try {
       if (isWin) {
-        const filterCmd = search ? `| Where-Object { $_.ProcessName -like "*${search}*" -or $_.Id -eq "${search}" }` : '';
-        const sortProp = sort_by === 'cpu' ? 'CPU' : sort_by === 'name' ? 'ProcessName' : sort_by === 'pid' ? 'Id' : 'WorkingSet64';
-        const psCmd = `powershell -NoProfile -Command "Get-Process ${filterCmd} | Sort-Object ${sortProp} -Descending | Select-Object -First ${maxItems} Id, ProcessName, CPU, @{Name='WorkingSetMB';Expression={[math]::round($_.WorkingSet64/1MB, 1)}}, Responding | ConvertTo-Json"`;
+        const stdout = await new Promise((res) => {
+          exec('powershell -NoProfile -Command "Get-Process | Select-Object -Property Id, ProcessName, WorkingSet64, CPU, Responding | ConvertTo-Json -Compress"', {
+            timeout: 8000,
+            maxBuffer: 1024 * 1024 * 10
+          }, (err, out) => res(out || ''));
+        });
 
-        exec(psCmd, { timeout: 15000, maxBuffer: 1024 * 1024 * 5 }, (err, stdout) => {
-          if (err || !stdout || !stdout.trim()) {
-            exec('tasklist /FO CSV /NH', { timeout: 10000 }, (tErr, tOut) => {
-              if (tErr) return resolve({ error: `Failed to list processes: ${tErr.message}` });
-              const lines = (tOut || '').split('\n').filter(l => l.trim());
-              const procs = [];
-              for (const line of lines) {
-                const parts = line.split('","').map(p => p.replace(/"/g, '').trim());
-                if (parts.length >= 5) {
-                  const name = parts[0];
-                  const pid = parseInt(parts[1], 10);
-                  const memStr = parts[4].replace(/[^0-9]/g, '');
-                  const memMB = memStr ? (parseInt(memStr, 10) / 1024).toFixed(1) : '0';
-                  if (!search || name.toLowerCase().includes(search.toLowerCase()) || String(pid) === search) {
-                    procs.push({ pid, name, memoryMB: parseFloat(memMB) });
-                  }
-                }
-              }
-              if (sort_by === 'name') procs.sort((a, b) => a.name.localeCompare(b.name));
-              else procs.sort((a, b) => b.memoryMB - a.memoryMB);
-              resolve({ totalFound: procs.length, processes: procs.slice(0, maxItems) });
-            });
-            return;
-          }
-
-          try {
-            let parsed = JSON.parse(stdout);
-            if (!Array.isArray(parsed)) parsed = [parsed];
-            const procs = parsed.map(p => ({
+        if (stdout.trim()) {
+          const parsed = JSON.parse(stdout);
+          const list = Array.isArray(parsed) ? parsed : [parsed];
+          for (const p of list) {
+            if (!p || !p.ProcessName) continue;
+            const memMB = Math.round((p.WorkingSet64 || 0) / (1024 * 1024));
+            const cpuSec = typeof p.CPU === 'number' ? p.CPU.toFixed(1) : '0';
+            processes.push({
               pid: p.Id,
               name: p.ProcessName,
-              cpuSeconds: p.CPU !== null && p.CPU !== undefined ? Number(Number(p.CPU).toFixed(2)) : 0,
-              memoryMB: p.WorkingSetMB,
-              responding: p.Responding !== false
-            }));
-            resolve({ totalFound: procs.length, processes: procs });
-          } catch (e) {
-            resolve({ rawOutput: stdout.slice(0, 3000) });
+              memoryMB: memMB,
+              cpuSeconds: parseFloat(cpuSec),
+              status: p.Responding !== false ? 'Running' : 'Not Responding'
+            });
           }
-        });
+        }
       } else {
-        const psCmd = `ps -eo pid,user,%cpu,%mem,comm --sort=-%mem | head -n ${maxItems + 1}`;
-        exec(psCmd, { timeout: 10000 }, (err, stdout) => {
-          if (err) return resolve({ error: `Failed to list processes: ${err.message}` });
-          const lines = (stdout || '').trim().split('\n');
-          const procs = [];
-          for (let i = 1; i < lines.length; i++) {
-            const parts = lines[i].trim().split(/\s+/);
-            if (parts.length >= 5) {
-              const pid = parseInt(parts[0], 10);
-              const user = parts[1];
-              const cpu = parseFloat(parts[2]);
-              const mem = parseFloat(parts[3]);
-              const name = parts.slice(4).join(' ');
-              if (!search || name.toLowerCase().includes(search.toLowerCase()) || String(pid) === search) {
-                procs.push({ pid, user, cpuPercent: cpu, memPercent: mem, name });
-              }
-            }
-          }
-          resolve({ totalFound: procs.length, processes: procs.slice(0, maxItems) });
+        const stdout = await new Promise((res) => {
+          exec('ps -eo pid,pmem,pcpu,comm --sort=-pmem', { timeout: 5000 }, (err, out) => res(out || ''));
         });
+        const lines = stdout.split('\n').filter(l => l.trim().length > 0);
+        for (let i = 1; i < lines.length; i++) {
+          const parts = lines[i].trim().split(/\s+/);
+          if (parts.length >= 4) {
+            processes.push({
+              pid: parseInt(parts[0], 10),
+              name: parts.slice(3).join(' '),
+              memoryPercent: parseFloat(parts[1]) || 0,
+              cpuPercent: parseFloat(parts[2]) || 0,
+              status: 'Running'
+            });
+          }
+        }
       }
-    });
+    } catch (e) {
+      return { error: `Failed to list processes: ${e.message}` };
+    }
+
+    let filtered = processes;
+    if (search) {
+      const q = search.toLowerCase();
+      filtered = filtered.filter(p => p.name.toLowerCase().includes(q) || String(p.pid).includes(q));
+    }
+
+    if (sort_by === 'memory') {
+      filtered.sort((a, b) => (b.memoryMB || b.memoryPercent || 0) - (a.memoryMB || a.memoryPercent || 0));
+    } else if (sort_by === 'cpu') {
+      filtered.sort((a, b) => (b.cpuSeconds || b.cpuPercent || 0) - (a.cpuSeconds || a.cpuPercent || 0));
+    } else if (sort_by === 'name') {
+      filtered.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sort_by === 'pid') {
+      filtered.sort((a, b) => a.pid - b.pid);
+    }
+
+    return {
+      totalProcesses: processes.length,
+      returnedCount: Math.min(filtered.length, limit),
+      processes: filtered.slice(0, limit)
+    };
   }
 
-  async killProcess({ pid, name, force = true }) {
+  async killProcess({ pid, name, force = true } = {}) {
     if (!pid && !name) {
-      return { error: 'Please provide either a pid (number) or name (string) to terminate.' };
+      return { error: 'Must provide either "pid" or "name" to terminate process.' };
     }
     const isWin = os.platform() === 'win32';
-    const forceFlag = force !== false;
+    let cmd = '';
+
+    if (isWin) {
+      if (pid) {
+        cmd = `taskkill ${force ? '/F' : ''} /PID ${pid}`;
+      } else {
+        const cleanName = name.endsWith('.exe') ? name : `${name}.exe`;
+        cmd = `taskkill ${force ? '/F' : ''} /IM "${cleanName}"`;
+      }
+    } else {
+      if (pid) {
+        cmd = `kill ${force ? '-9' : '-15'} ${pid}`;
+      } else {
+        cmd = `pkill ${force ? '-9' : '-15'} -f "${name}"`;
+      }
+    }
 
     return new Promise((resolve) => {
-      let cmd = '';
-      if (isWin) {
-        if (pid) {
-          cmd = `taskkill ${forceFlag ? '/F' : ''} /PID ${pid}`;
-        } else {
-          cmd = `taskkill ${forceFlag ? '/F' : ''} /IM "${name.endsWith('.exe') ? name : name + '.exe'}"`;
-        }
-      } else {
-        if (pid) {
-          cmd = `kill ${forceFlag ? '-9' : '-15'} ${pid}`;
-        } else {
-          cmd = `pkill ${forceFlag ? '-9' : ''} -f "${name}"`;
-        }
-      }
-
-      exec(cmd, (err, stdout, stderr) => {
+      exec(cmd, { timeout: 5000 }, (err, stdout, stderr) => {
         if (err) {
-          return resolve({
+          resolve({
             success: false,
-            error: (stderr || err.message).trim(),
-            command: cmd
+            error: stderr || stdout || err.message,
+            commandExecuted: cmd
+          });
+        } else {
+          resolve({
+            success: true,
+            message: `Process ${pid || name} successfully terminated.`,
+            output: (stdout || '').trim(),
+            commandExecuted: cmd
           });
         }
-        resolve({
-          success: true,
-          message: (stdout || 'Process terminated successfully').trim(),
-          command: cmd
-        });
       });
     });
   }
 
-  async getNetworkInfo({ port, listening_only = true }) {
+  async getNetworkInfo({ include_interfaces = true, listening_only = true } = {}) {
     const isWin = os.platform() === 'win32';
+    const interfaces = include_interfaces ? os.networkInterfaces() : {};
+    let openPorts = [];
 
-    return new Promise((resolve) => {
+    try {
       if (isWin) {
-        const filterPort = port ? `| Where-Object { $_.LocalPort -eq ${port} }` : '';
-        const filterState = listening_only ? `| Where-Object { $_.State -eq 'Listen' }` : '';
-        const psCmd = `powershell -NoProfile -Command "Get-NetTCPConnection ${filterState} ${filterPort} | Select-Object -First 50 LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | Sort-Object LocalPort | ConvertTo-Json"`;
-
-        exec(psCmd, { timeout: 15000 }, (err, stdout) => {
-          if (err || !stdout || !stdout.trim()) {
-            exec('netstat -ano -p tcp', { timeout: 10000 }, (nErr, nOut) => {
-              if (nErr) return resolve({ error: `Failed to get network info: ${nErr.message}` });
-              const lines = (nOut || '').split('\n').filter(l => l.includes('TCP'));
-              const conns = [];
-              for (const line of lines) {
-                const parts = line.trim().split(/\s+/);
-                if (parts.length >= 4) {
-                  const local = parts[1];
-                  const state = parts[3];
-                  const pid = parts[4] ? parseInt(parts[4], 10) : undefined;
-                  const localPort = parseInt(local.split(':').pop(), 10);
-                  if ((!port || localPort === port) && (!listening_only || state === 'LISTENING')) {
-                    conns.push({ localAddress: local, localPort, state, pid });
-                  }
-                }
-              }
-              resolve({ totalFound: conns.length, connections: conns.slice(0, 50) });
-            });
-            return;
-          }
-
-          try {
-            let parsed = JSON.parse(stdout);
-            if (!Array.isArray(parsed)) parsed = [parsed];
-            const conns = parsed.map(c => ({
-              localAddress: c.LocalAddress,
-              localPort: c.LocalPort,
-              remoteAddress: c.RemoteAddress,
-              remotePort: c.RemotePort,
-              state: c.State,
-              pid: c.OwningProcess
-            }));
-            resolve({ totalFound: conns.length, connections: conns });
-          } catch (e) {
-            resolve({ rawOutput: stdout.slice(0, 3000) });
-          }
+        const stdout = await new Promise((res) => {
+          exec('netstat -ano -p tcp', { timeout: 6000 }, (err, out) => res(out || ''));
         });
+        const lines = stdout.split('\r\n');
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 4 && parts[0] === 'TCP') {
+            const state = parts[3];
+            if (listening_only && state !== 'LISTENING') continue;
+            const localAddr = parts[1];
+            const foreignAddr = parts[2];
+            const pid = parts[4] || '';
+            openPorts.push({
+              protocol: 'TCP',
+              localAddress: localAddr,
+              foreignAddress: foreignAddr,
+              state,
+              pid: parseInt(pid, 10) || null
+            });
+          }
+        }
       } else {
-        const cmd = port ? `lsof -iTCP:${port} -sTCP:LISTEN -P -n` : `lsof -iTCP -sTCP:LISTEN -P -n | head -n 50`;
-        exec(cmd, { timeout: 10000 }, (err, stdout) => {
-          if (err) {
-            exec('netstat -tuln', { timeout: 10000 }, (nErr, nOut) => {
-              if (nErr) return resolve({ error: 'Could not fetch network info.' });
-              resolve({ rawOutput: (nOut || '').slice(0, 3000) });
-            });
-            return;
-          }
-          resolve({ rawOutput: (stdout || '').slice(0, 3000) });
+        const stdout = await new Promise((res) => {
+          exec('netstat -tuln 2>/dev/null || ss -tuln 2>/dev/null', { timeout: 5000 }, (err, out) => res(out || ''));
         });
+        const lines = stdout.split('\n');
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 4 && (parts[0].startsWith('tcp') || parts[0].startsWith('udp'))) {
+            openPorts.push({
+              protocol: parts[0].toUpperCase(),
+              localAddress: parts[3],
+              foreignAddress: parts[4] || '*:*',
+              state: parts[5] || 'LISTEN'
+            });
+          }
+        }
       }
-    });
+    } catch (e) {
+      // Ignore network errors
+    }
+
+    return {
+      interfaces: Object.fromEntries(
+        Object.entries(interfaces).map(([k, v]) => [
+          k,
+          (v || []).map(addr => ({
+            family: addr.family,
+            address: addr.address,
+            netmask: addr.netmask,
+            mac: addr.mac,
+            internal: addr.internal
+          }))
+        ])
+      ),
+      listeningPortsCount: openPorts.length,
+      openPorts: openPorts.slice(0, 50)
+    };
   }
 
   async readFile({ path: filePath, start_line, end_line }) {
@@ -728,28 +857,32 @@ export class ToolExecutor {
     if (!fs.existsSync(fullPath)) {
       return { error: `File not found: ${filePath}` };
     }
-    const content = fs.readFileSync(fullPath, 'utf8');
-    const lines = content.split('\n');
+    const stat = fs.statSync(fullPath);
+    if (stat.isDirectory()) {
+      return { error: `Path is a directory, not a file: ${filePath}. Use 'list_dir' instead.` };
+    }
+    if (stat.size > 1024 * 1024 * 5) {
+      return { error: `File is too large (> 5MB): ${filePath}` };
+    }
+    const raw = fs.readFileSync(fullPath, 'utf8');
+    const lines = raw.split('\n');
 
     if (start_line !== undefined || end_line !== undefined) {
       const start = Math.max(1, start_line || 1) - 1;
       const end = Math.min(lines.length, end_line || lines.length);
-      const sliced = lines.slice(start, end);
-      const numbered = sliced.map((line, idx) => `${start + idx + 1}: ${line}`).join('\n');
+      const sliced = lines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n');
       return {
         path: filePath,
-        fullPath: fullPath,
-        linesCount: lines.length,
-        showingLines: `${start + 1}-${end}`,
-        content: numbered
+        totalLines: lines.length,
+        lines: `${start + 1}-${end}`,
+        content: sliced
       };
     }
 
     return {
       path: filePath,
-      fullPath: fullPath,
-      linesCount: lines.length,
-      content: content
+      totalLines: lines.length,
+      content: raw
     };
   }
 
@@ -759,106 +892,71 @@ export class ToolExecutor {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-
-    const existed = fs.existsSync(fullPath);
-    const oldContent = existed ? fs.readFileSync(fullPath, 'utf8') : '';
-    
     fs.writeFileSync(fullPath, content, 'utf8');
 
-    const diff = Diff.createPatch(filePath, oldContent, content, 'Original', 'Updated');
-
     onStatusUpdate({
-      type: 'file_modified',
+      type: 'file_written',
       path: filePath,
-      fullPath: fullPath,
-      action: existed ? 'updated' : 'created',
-      diff: diff
+      fullPath
     });
 
     return {
       success: true,
-      path: filePath,
-      fullPath: fullPath,
-      action: existed ? 'File updated successfully' : 'File created successfully',
-      bytes: Buffer.byteLength(content, 'utf8'),
-      diff: diff
+      message: `File written: ${filePath}`,
+      path: filePath
     };
   }
 
   async applyDiff({ path: filePath, search_content, replace_content }, onStatusUpdate) {
     const fullPath = resolveSafePath(this.workspaceRoot, filePath);
     if (!fs.existsSync(fullPath)) {
-      return { error: `File not found: ${filePath}. Use write_file to create it.` };
+      return { error: `File not found to apply diff: ${filePath}` };
     }
-
     const original = fs.readFileSync(fullPath, 'utf8');
-    
-    // Normalization to handle CRLF vs LF differences
-    const normalize = str => str.replace(/\r\n/g, '\n');
-    const normOriginal = normalize(original);
-    const normSearch = normalize(search_content);
-    const normReplace = normalize(replace_content);
 
-    let updated = '';
-    if (normOriginal.includes(normSearch)) {
-      updated = normOriginal.replace(normSearch, normReplace);
-    } else {
-      // Fuzzy search fallback: trim trailing whitespace on each line
-      const cleanLines = text => text.split('\n').map(l => l.trimEnd()).join('\n');
-      const cleanOriginal = cleanLines(normOriginal);
-      const cleanSearch = cleanLines(normSearch);
+    // Normalize line endings for exact matching
+    const normOriginal = original.replace(/\r\n/g, '\n');
+    const normSearch = search_content.replace(/\r\n/g, '\n');
+    const normReplace = replace_content.replace(/\r\n/g, '\n');
 
-      if (cleanOriginal.includes(cleanSearch)) {
-        const origLines = normOriginal.split('\n');
-        const searchLines = normSearch.split('\n');
-        let matchIndex = -1;
+    if (!normOriginal.includes(normSearch)) {
+      // Fuzzy fallback: trim trailing whitespace on each line
+      const cleanOrig = normOriginal.split('\n').map(l => l.trimEnd()).join('\n');
+      const cleanSearch = normSearch.split('\n').map(l => l.trimEnd()).join('\n');
 
-        for (let i = 0; i <= origLines.length - searchLines.length; i++) {
-          let match = true;
-          for (let j = 0; j < searchLines.length; j++) {
-            if (origLines[i + j].trim() !== searchLines[j].trim()) {
-              match = false;
-              break;
-            }
-          }
-          if (match) {
-            matchIndex = i;
-            break;
-          }
-        }
-
-        if (matchIndex !== -1) {
-          origLines.splice(matchIndex, searchLines.length, ...normReplace.split('\n'));
-          updated = origLines.join('\n');
-        } else {
-          return {
-            error: `Could not find exact match for search_content in ${filePath}. Please double-check the code you want to replace.`
-          };
-        }
-      } else {
+      if (!cleanOrig.includes(cleanSearch)) {
         return {
-          error: `Could not find search_content in ${filePath}. Verify lines and content.`
+          error: `Could not find exact match for 'search_content' in ${filePath}. Please read the file first to ensure the code matches.`,
+          path: filePath
         };
       }
+
+      const replaced = cleanOrig.replace(cleanSearch, normReplace);
+      fs.writeFileSync(fullPath, replaced, 'utf8');
+    } else {
+      const replaced = normOriginal.replace(normSearch, normReplace);
+      fs.writeFileSync(fullPath, replaced, 'utf8');
     }
 
-    fs.writeFileSync(fullPath, updated, 'utf8');
-    const diff = Diff.createPatch(filePath, original, updated, 'Original', 'Modified');
+    // Generate unified diff for UI diff visualizer
+    const unifiedDiff = Diff.createPatch(
+      filePath,
+      original,
+      fs.readFileSync(fullPath, 'utf8')
+    );
 
     onStatusUpdate({
-      type: 'file_modified',
+      type: 'diff_applied',
       path: filePath,
-      fullPath: fullPath,
-      action: 'patched',
-      diff: diff
+      fullPath,
+      diff: unifiedDiff
     });
 
     return {
       success: true,
+      message: `Diff successfully applied to ${filePath}`,
       path: filePath,
-      fullPath: fullPath,
-      message: 'Diff applied successfully',
-      diff: diff
+      diff: unifiedDiff
     };
   }
 
@@ -868,70 +966,71 @@ export class ToolExecutor {
       return { error: `Directory not found: ${dirPath}` };
     }
 
-    const IGNORED = ['.git', 'node_modules', 'dist', 'build', '.next', '.cache', '__pycache__', '.venv', 'venv'];
-    
-    const results = [];
-    const scan = (current, rel) => {
-      try {
-        const entries = fs.readdirSync(current, { withFileTypes: true });
-        for (const entry of entries) {
-          if (IGNORED.includes(entry.name)) continue;
-          const entryRel = rel ? path.join(rel, entry.name) : entry.name;
-          const entryFull = path.join(current, entry.name);
-          
-          if (entry.isDirectory()) {
-            results.push({ name: entry.name, path: entryRel, fullPath: entryFull, type: 'directory' });
-            if (recursive && results.length < 150) {
-              scan(entryFull, entryRel);
-            }
-          } else {
-            let size = 0;
-            try { size = fs.statSync(entryFull).size; } catch (e) {}
-            results.push({ name: entry.name, path: entryRel, fullPath: entryFull, type: 'file', size });
+    const IGNORE = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.cache', 'dist-exe', 'dist-server']);
+
+    const readEntries = (currentDir, depth = 0) => {
+      if (depth > 4) return [];
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      const items = [];
+
+      for (const e of entries) {
+        if (IGNORE.has(e.name)) continue;
+        const itemPath = path.join(currentDir, e.name);
+        const rel = path.relative(fullPath, itemPath);
+
+        if (e.isDirectory()) {
+          items.push({ name: e.name, path: rel, type: 'directory' });
+          if (recursive && depth < 3) {
+            items.push(...readEntries(itemPath, depth + 1));
           }
+        } else {
+          items.push({ name: e.name, path: rel, type: 'file' });
         }
-      } catch (e) {
-        // Permission denied or unreadable directory
       }
+      return items;
     };
 
-    scan(fullPath, '');
+    const items = readEntries(fullPath);
     return {
       path: dirPath,
-      fullPath: fullPath,
-      totalEntries: results.length,
-      entries: results.slice(0, 150) // limit output token usage
+      total: items.length,
+      items: items.slice(0, 200)
     };
   }
 
-  async searchCode({ query, file_extension, path: searchDir }) {
-    const targetDir = searchDir ? resolveSafePath(this.workspaceRoot, searchDir) : (this.workspaceRoot || os.homedir());
-    if (!fs.existsSync(targetDir)) return { error: `Directory not found: ${targetDir}` };
+  async searchCode({ query, path: searchPath = '.', file_extension }) {
+    const targetDir = resolveSafePath(this.workspaceRoot, searchPath);
+    if (!fs.existsSync(targetDir)) {
+      return { error: `Directory not found: ${searchPath}` };
+    }
+
     const results = [];
-    const IGNORED = ['.git', 'node_modules', 'dist', 'build', '.next', '.cache', '__pycache__', '.venv', 'venv'];
-    const maxResults = 30;
+    const IGNORE = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'package-lock.json']);
 
-    const scan = (dir, rel) => {
-      if (results.length >= maxResults) return;
+    const scan = (current, rel) => {
+      if (results.length >= 50) return;
       try {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (IGNORED.includes(entry.name)) continue;
-          const full = path.join(dir, entry.name);
-          const entryRel = rel ? path.join(rel, entry.name) : entry.name;
+        const entries = fs.readdirSync(current, { withFileTypes: true });
+        for (const e of entries) {
+          if (results.length >= 50) break;
+          if (IGNORE.has(e.name)) continue;
 
-          if (entry.isDirectory()) {
-            scan(full, entryRel);
-          } else if (entry.isFile()) {
-            if (file_extension && !entry.name.endsWith(file_extension)) continue;
+          const itemPath = path.join(current, e.name);
+          const itemRel = path.join(rel, e.name);
+
+          if (e.isDirectory()) {
+            scan(itemPath, itemRel);
+          } else if (e.isFile()) {
+            if (file_extension && !e.name.endsWith(file_extension)) continue;
+
             try {
-              const content = fs.readFileSync(full, 'utf8');
+              const content = fs.readFileSync(itemPath, 'utf8');
               const lines = content.split('\n');
               lines.forEach((line, idx) => {
-                if (line.toLowerCase().includes(query.toLowerCase()) && results.length < maxResults) {
+                if (results.length >= 50) return;
+                if (line.toLowerCase().includes(query.toLowerCase())) {
                   results.push({
-                    file: entryRel,
-                    fullPath: full,
+                    file: itemRel,
                     line: idx + 1,
                     content: line.trim()
                   });
@@ -991,4 +1090,3 @@ export class ToolExecutor {
     });
   }
 }
-

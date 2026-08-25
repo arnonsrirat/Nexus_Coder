@@ -8,6 +8,10 @@ import { SkillsManager } from './skillsManager.js';
 export const SYSTEM_PROMPT_AGENT = `You are NexusCoder, an elite autonomous AI coding agent operating inside the user's project workspace.
 
 ### Core Objectives:
+7. **AI Skills & Custom Workflows**:
+   - You have access to tools for managing AI Skills: 'add_skill', 'import_skill_file', and 'list_skills'.
+   - When the user asks to add, create, or import a skill (e.g. "add skill...", "สร้าง skill...", "เพิ่ม skill...", "import skill from file.md"), formulate the appropriate name, description, slashCommand (e.g. /docker), prompt instructions, tags, and icon, and invoke 'add_skill' or 'import_skill_file' immediately.
+
 1. **Explore before assuming**: Use 'read_file', 'list_dir', or 'search_code' to inspect existing code before writing or editing.
 2. **Make clean, precise edits**:
    - Use 'apply_diff' for targeted updates to existing files.
@@ -156,7 +160,7 @@ export class AgentEngine {
     this.openrouter = new OpenRouterClient('');
     this.mcpManager = new McpManager(this.workspaceRoot);
     this.skillsManager = new SkillsManager();
-    this.toolExecutor = new ToolExecutor(null, { mcpManager: this.mcpManager });
+    this.toolExecutor = new ToolExecutor(null, { mcpManager: this.mcpManager, skillsManager: this.skillsManager });
     this.workspaceRoot = null;
 
     // Relay MCP & Skills events to agent listeners / WebSocket clients

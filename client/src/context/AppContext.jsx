@@ -330,6 +330,16 @@ export function AppProvider({ children }) {
     return res;
   };
 
+  const importSkillMarkdown = async (payload) => {
+    const res = await api.importSkillMarkdown(payload);
+    await loadSkillsData();
+    return res;
+  };
+
+  const exportSkillMarkdown = async (id) => {
+    return await api.exportSkillMarkdown(id);
+  };
+
   // Refresh Workspace Tree.
   // Deliberately has no reactive dependencies: it reads the current workspace
   // from a ref so its identity stays stable. Previously it changed whenever
@@ -1343,7 +1353,9 @@ export function AppProvider({ children }) {
     toggleSkill,
     saveSkill,
     deleteSkill,
-    resetBuiltinSkills
+    resetBuiltinSkills,
+    importSkillMarkdown,
+    exportSkillMarkdown
   };
 
   const actions = useMemo(() => {

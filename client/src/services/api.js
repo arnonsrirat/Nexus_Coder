@@ -316,3 +316,23 @@ export async function resetBuiltinSkills() {
 
 
 
+
+
+export async function importSkillMarkdown(payload) {
+  const res = await fetch(`${API_BASE}/skills/import-md`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to import skill markdown');
+  }
+  return res.json();
+}
+
+export async function exportSkillMarkdown(id) {
+  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(id)}/export-md`);
+  if (!res.ok) throw new Error('Failed to export skill markdown');
+  return res.text();
+}

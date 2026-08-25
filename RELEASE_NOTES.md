@@ -1,3 +1,21 @@
+# 🚀 NexusCoder Studio Release Notes
+
+## 🌟 v1.0.33 — AI Skills .md Import/Export & Autonomous AI Skill Creation
+
+### 🎯 ฟีเจอร์ใหม่ (New Features)
+1. **📥 รองรับการ Import ไฟล์ `.md` เข้าสู่ระบบ AI Skills**:
+   - สามารถกดปุ่ม **"Import .md"** ในหน้าต่าง AI Skills เพื่อเลือกไฟล์ Markdown (`.md`, `.markdown`, `.txt`) เข้ามาได้หลายไฟล์พร้อมกัน
+   - **Drag & Drop**: ลากไฟล์ `.md` เข้ามาวางบนหน้าต่าง Skills Modal ได้โดยตรง พร้อม UI Overlay แสดงสถานะชัดเจน
+   - **Smart Parser**: รองรับทั้งมาตรฐาน YAML Frontmatter (`name`, `slashCommand`, `description`, `tags`, `icon`, `prompt`) และ Standard Markdown Headers (`# Name`, `> Description`, `Command: /...`, `Tags: ...`, `Icon: ...`)
+   - **Form Assistant**: มีเมนู *Paste / Load .md* ภายในฟอร์มสร้าง/แก้ไข Skill เพื่อแปลง Markdown เป็นฟิลด์ต่างๆ ให้อัตโนมัติ
+2. **🤖 AI เพิ่ม/สร้าง Skill อัตโนมัติผ่าน Prompt (Autonomous Skill Tooling)**:
+   - เพิ่ม Agent Tools ใหม่: `add_skill`, `import_skill_file`, และ `list_skills`
+   - เมื่อสั่ง AI ในแชท เช่น *"add skill สำหรับ Docker"*, *"สร้าง skill สำหรับ Flutter Riverpod"*, หรือ *"เพิ่ม skill จากไฟล์ my-skill.md"* AI จะวิเคราะห์และสร้าง Skill บันทึกเข้าสู่ระบบทันทีแบบ Real-time
+3. **📤 Export Skill เป็นไฟล์ `.md`**:
+   - มีปุ่ม Export/Download บนการ์ดของทุก Skill สำหรับดาวน์โหลดออกมาเป็นไฟล์ `.skill.md` พร้อม YAML Frontmatter เพื่อนำไปแชร์หรือสำรองข้อมูล
+
+---
+
 # 🚀 NexusCoder Studio — Release Notes v1.0.31 (Agent 429 Rate-Limit Fix)
 
 **วันที่อัปเดต:** 25 สิงหาคม 2026  
