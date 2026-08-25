@@ -295,11 +295,6 @@ export class AppUpdater {
   }
 
   // Installs the downloaded update silently and brings the app straight back up.
-  //
-  // The setup binary is NexusCoder itself running in installer mode
-  // (electron/installer.cjs), so `--silent --install-dir=...` overwrites the
-  // current installation with no window and no clicks. A tiny batch runner does
-  // the work because the app has to exit before its own files can be replaced.
   applyUpdate() {
     if (!this.downloadedFilePath || !fs.existsSync(this.downloadedFilePath)) {
       throw new Error('No downloaded update file found to apply.');
@@ -307,113 +302,106 @@ export class AppUpdater {
 
     const installerPath = path.resolve(this.downloadedFilePath);
     const tempDir = this.getTempUpdateDir();
-    const batchPath = path.join(tempDir, 'run-update.cmd');
-    const vbsPath = path.join(tempDir, 'run-hidden.vbs');
+    const vbsPath = path.join(tempDir, 'run-update.vbs');
     const doneMarker = path.join(tempDir, 'install-done.marker');
     const failMarker = path.join(tempDir, 'install-failed.marker');
 
-    // Clear stale markers from any previous update attempt, so the wait loop
-    // below can never read a leftover "done" file and think this run is
-    // finished before it has even started.
+    // Clear stale markers from any previous update attempt
     try { fs.unlinkSync(doneMarker); } catch (e) {}
     try { fs.unlinkSync(failMarker); } catch (e) {}
 
-    // The running executable is replaced in place by the installer, so the same
-    // path is the correct one to relaunch. Keep a default install location as a
-    // fallback for the (unpackaged) dev case.
     const appExePath = process.execPath;
     const isPackaged = !appExePath.toLowerCase().endsWith('node.exe');
     const fallbackExePath = path.join(
       process.env.LOCALAPPDATA || os.homedir(),
       'Programs', 'NexusCoder', 'NexusCoder.exe'
     );
-    const relaunchPath = isPackaged ? appExePath : fallbackExePath;
-    // Install over the directory the running app lives in, so a custom install
-    // location chosen at setup time is preserved across updates.
     const installDir = isPackaged ? path.dirname(appExePath) : path.dirname(fallbackExePath);
+    const targetExe = path.join(installDir, 'NexusCoder.exe');
+    const relaunchPath = fs.existsSync(targetExe) ? targetExe : (isPackaged ? appExePath : fallbackExePath);
 
-    console.log(`🚀 Installing update silently: ${installerPath}`);
-    console.log(`📍 Will relaunch: ${relaunchPath} (isPackaged: ${isPackaged})`);
+    console.log(`🚀 Installing update silently (pure GUI runner): ${installerPath}`);
+    console.log(`📍 Target Install Dir: ${installDir}`);
+    console.log(`📍 Will relaunch: ${relaunchPath}`);
 
     try {
-      // Two problems kept making this visibly "stuck", and both trace back
-      // to the same root cause: the downloaded file is an NSIS self-
-      // extracting "portable" stub, not the real installer. It unpacks this
-      // app to a temp folder and runs it from there - so:
-      //  - its own process can exit long before the extracted copy actually
-      //    finishes installing, which is why waiting on ANY process name
-      //    (the stub's, `start /wait`'s handle, a tasklist poll) was never a
-      //    reliable "done" signal - it either relaunched too early onto a
-      //    half-written binary, or the poll never matched and spun forever.
-      //  - the stub (or a console-subsystem step inside it) can allocate its
-      //    own console window on the interactive desktop; cmd.exe's own
-      //    CREATE_NO_WINDOW only hides *cmd's* window, not a child's.
-      //
-      // Fixed by launching through WScript.Shell.Run with window style 0
-      // (SW_HIDE) - the standard, guaranteed-hidden way to run a process
-      // from a script regardless of its subsystem - and by having the
-      // installer (electron/installer.cjs) write a marker file when it
-      // actually finishes, so this script waits on real completion instead
-      // of guessing from a process name. Still bounded (45s) so a genuinely
-      // stuck installer can never hang this forever.
-      const vbsScript = `Set objShell = CreateObject("WScript.Shell")
-objShell.Run """${installerPath}"" --silent ""--install-dir=${installDir}""", 0, False
+      // Create a pure VBScript runner executed via wscript.exe (GUI host, 0 console allocation)
+      // This completely eliminates any flashing command prompts or black screens.
+      const vbsScript = `' NexusCoder Pure Silent Updater & Auto-Relauncher
+Set objShell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+
+' 1. Brief pause to allow current process to exit gracefully
+WScript.Sleep 1200
+
+' 2. Ensure any lingering NexusCoder process is cleanly terminated
+On Error Resume Next
+objShell.Run "taskkill /f /im NexusCoder.exe", 0, True
+On Error Goto 0
+WScript.Sleep 400
+
+' 3. Run the installer silently over the target install directory
+Dim installerCmd
+installerCmd = """" & "${installerPath.replace(/\\/g, '\\\\')}" & """ --silent ""--install-dir=${installDir.replace(/\\/g, '\\\\')}"""
+objShell.Run installerCmd, 0, True
+
+' 4. Wait for install-done marker or target binary (bounded to 50s)
+Dim doneFile, failFile, targetApp, tries
+doneFile = "${doneMarker.replace(/\\/g, '\\\\')}"
+failFile = "${failMarker.replace(/\\/g, '\\\\')}"
+targetApp = "${targetExe.replace(/\\/g, '\\\\')}"
+tries = 0
+
+Do While tries < 50
+    If fso.FileExists(doneFile) Or fso.FileExists(failFile) Then
+        Exit Do
+    End If
+    WScript.Sleep 1000
+    tries = tries + 1
+Loop
+
+WScript.Sleep 800
+
+' 5. Guaranteed Relaunch: Check if targetExe or fallback exists and launch
+Dim appToRun
+If fso.FileExists(targetApp) Then
+    appToRun = targetApp
+Else
+    appToRun = "${relaunchPath.replace(/\\/g, '\\\\')}"
+End If
+
+If fso.FileExists(appToRun) Then
+    ' Launch with WindowStyle 1 (SW_SHOWNORMAL) detached
+    objShell.Run """" & appToRun & """", 1, False
+End If
+
+' 6. Cleanup temporary update files
+WScript.Sleep 2000
+On Error Resume Next
+fso.DeleteFile "${installerPath.replace(/\\/g, '\\\\')}", True
+fso.DeleteFile doneFile, True
+fso.DeleteFile failFile, True
+fso.DeleteFile WScript.ScriptFullName, True
 `;
+
       fs.writeFileSync(vbsPath, vbsScript, 'utf8');
 
-      const batchScript = `@echo off
-title NexusCoder Updater
-rem Brief grace period for this process's own graceful process.exit(0) to
-rem land before force-killing it, so no write is caught mid-flush.
-timeout /t 1 /nobreak >nul
-taskkill /f /im "NexusCoder.exe" >nul 2>&1
-
-rem Unattended install straight over the current installation, launched
-rem fully hidden regardless of what subsystem the installer/stub is.
-set NEXUSCODER_SILENT_INSTALL=1
-set NEXUSCODER_INSTALL_DIR=${installDir}
-cscript //nologo //B "${vbsPath}"
-
-rem Wait for the completion marker the installer writes when it is actually
-rem done, instead of tracking a process name. Bounded to 45s.
-set NEXUSCODER_WAIT_TRIES=0
-:waitinstaller
-if exist "${doneMarker}" goto relaunch
-if exist "${failMarker}" goto relaunch
-set /a NEXUSCODER_WAIT_TRIES+=1
-if %NEXUSCODER_WAIT_TRIES% gtr 45 goto relaunch
-timeout /t 1 /nobreak >nul
-goto waitinstaller
-
-:relaunch
-start "" "${relaunchPath}"
-del /f /q "${installerPath}" >nul 2>&1
-del /f /q "${vbsPath}" >nul 2>&1
-del /f /q "${doneMarker}" >nul 2>&1
-del /f /q "${failMarker}" >nul 2>&1
-del /f /q "%~f0" >nul 2>&1
-exit
-`;
-
-      fs.writeFileSync(batchPath, batchScript, 'utf8');
-
-      // Detached and window-hidden: a black console flashing up mid-update
-      // looks like something went wrong.
-      const child = spawn('cmd.exe', ['/c', batchPath], {
+      // Launch wscript.exe completely detached and hidden
+      const child = spawn('wscript.exe', ['//nologo', vbsPath], {
         detached: true,
         stdio: 'ignore',
         windowsHide: true
       });
       child.unref();
 
-      // Gracefully terminate this process so the installer can replace files.
+      // Gracefully terminate this process so the installer can overwrite files.
       setTimeout(() => {
         process.exit(0);
-      }, 800);
+      }, 700);
 
       return { success: true, message: 'Installing update silently. NexusCoder will restart automatically.' };
     } catch (err) {
-      console.error('Failed to launch silent installer via batch:', err);
+      console.error('Failed to launch silent installer via wscript:', err);
       // Fallback: run the installer directly, still unattended.
       try {
         const child = spawn(installerPath, ['--silent', `--install-dir=${installDir}`], {

@@ -17,7 +17,12 @@ import {
   RotateCcw,
   Code2,
   Bot,
-  Monitor
+  Monitor,
+  Network,
+  Sun,
+  Moon,
+  Droplets,
+  Check
 } from 'lucide-react';
 
 export default function Header() {
@@ -26,6 +31,10 @@ export default function Header() {
     workspaceName,
     setIsFolderPickerOpen,
     setIsSettingsOpen,
+    setIsMcpModalOpen,
+    setIsSkillsModalOpen,
+    mcpSummary,
+    activeSkills,
     model,
     models,
     saveSettings,
@@ -46,6 +55,7 @@ export default function Header() {
   } = useApp();
 
   const [isLayoutMenuOpen, setIsLayoutMenuOpen] = React.useState(false);
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = React.useState(false);
 
   const handleModelChange = (e) => {
     saveSettings({ selectedModel: e.target.value });
@@ -184,6 +194,47 @@ export default function Header() {
           <span>{autoApprove ? 'Auto-Pilot' : 'Safe Mode'}</span>
         </button>
 
+        {/* MCP Status Indicator & Menu */}
+        <button
+          onClick={() => setIsMcpModalOpen(true)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+            mcpSummary?.hasConnected
+              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/50 hover:bg-emerald-900/60 shadow-sm shadow-emerald-500/20'
+              : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-cyan-300 hover:border-slate-700'
+          }`}
+          title={`Model Context Protocol: ${mcpSummary?.connectedCount || 0} server(s) connected (${mcpSummary?.totalToolsCount || 0} tools) — Click to open MCP Manager`}
+        >
+          <Network className={`w-3.5 h-3.5 ${mcpSummary?.hasConnected ? 'text-emerald-400' : 'text-slate-400'}`} />
+          <span>MCP</span>
+          {mcpSummary?.hasConnected ? (
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-mono text-[10px] font-bold text-emerald-300">{mcpSummary.connectedCount}</span>
+            </span>
+          ) : (
+            <span className="text-[10px] text-slate-500 font-mono">Off</span>
+          )}
+        </button>
+
+        {/* AI Skills Button */}
+        <button
+          onClick={() => setIsSkillsModalOpen(true)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+            activeSkills?.length > 0
+              ? 'bg-purple-950/60 text-purple-300 border-purple-500/50 hover:bg-purple-900/60 shadow-sm shadow-purple-500/20'
+              : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-purple-300 hover:border-slate-700'
+          }`}
+          title={`AI Skills: ${activeSkills?.length || 0} active workflow(s) — Click to configure`}
+        >
+          <Sparkles className={`w-3.5 h-3.5 ${activeSkills?.length > 0 ? 'text-purple-400' : 'text-slate-400'}`} />
+          <span>Skills</span>
+          {activeSkills?.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-purple-500/30 text-purple-200 text-[10px] font-mono font-bold">
+              {activeSkills.length}
+            </span>
+          )}
+        </button>
+
         {/* Terminal Toggle Button */}
         <button
           onClick={() => setTerminalOpen(!terminalOpen)}
@@ -218,7 +269,10 @@ export default function Header() {
         {/* Workspace Layout Customizer Menu */}
         <div className="relative">
           <button
-            onClick={() => setIsLayoutMenuOpen(!isLayoutMenuOpen)}
+            onClick={() => {
+              setIsLayoutMenuOpen(!isLayoutMenuOpen);
+              setIsThemeMenuOpen(false);
+            }}
             className={`p-2 rounded-lg border transition-all ${
               isLayoutMenuOpen 
                 ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/50 shadow-md shadow-cyan-500/20' 
@@ -314,23 +368,179 @@ export default function Header() {
           )}
         </div>
 
-        {/* Quick Theme Switcher Button */}
-        <button
-          onClick={() => {
-            const themeCycle = ['default', 'liquid-glass', 'aurora-glass', 'obsidian-glass'];
-            const currentIndex = themeCycle.indexOf(theme || 'default');
-            const nextTheme = themeCycle[(currentIndex + 1) % themeCycle.length];
-            setTheme(nextTheme);
-          }}
-          className={`p-2 rounded-lg border transition-all ${
-            theme && theme !== 'default'
-              ? 'bg-pink-950/50 text-pink-300 border-pink-500/50 hover:bg-pink-900/50 shadow-md shadow-pink-500/20'
-              : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-pink-400'
-          }`}
-          title={`Theme: ${theme === 'liquid-glass' ? 'Hyper Liquid Glass' : theme === 'aurora-glass' ? 'Aurora Liquid Glass' : theme === 'obsidian-glass' ? 'Obsidian Onyx Glass' : 'Default (Cyber Dark)'} — Click to cycle themes`}
-        >
-          <Palette className="w-4 h-4" />
-        </button>
+        {/* Theme & Layout Selector Dropdown */}
+        <div className="relative">
+          <button
+            onClick={() => {
+              setIsThemeMenuOpen(!isThemeMenuOpen);
+              setIsLayoutMenuOpen(false);
+            }}
+            className={`p-2 rounded-lg border transition-all ${
+              theme && theme !== 'default'
+                ? 'bg-pink-950/50 text-pink-300 border-pink-500/50 hover:bg-pink-900/50 shadow-md shadow-pink-500/20'
+                : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-pink-400'
+            }`}
+            title="Switch UI Layout Theme & Aesthetics (สไตล์สว่าง คลีน / สไตล์ดำ คลีน / Hyper Liquid Glass)"
+          >
+            <Palette className="w-4 h-4" />
+          </button>
+
+          {isThemeMenuOpen && (
+            <>
+              <div 
+                className="fixed inset-0 z-40"
+                onClick={() => setIsThemeMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-11 w-72 bg-slate-900/95 border border-slate-700/80 rounded-xl p-3 shadow-2xl z-50 backdrop-blur-xl space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-800 text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                  <span className="flex items-center gap-1.5">
+                    <Palette className="w-3.5 h-3.5 text-pink-400" />
+                    <span>Theme & Layout</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500 capitalize">{theme || 'default'}</span>
+                </div>
+
+                <div className="space-y-1.5 text-xs">
+                  {/* Hyper Liquid Glass */}
+                  <button
+                    onClick={() => {
+                      setTheme('liquid-glass');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all text-left ${
+                      theme === 'liquid-glass'
+                        ? 'bg-cyan-950/70 text-cyan-200 border border-cyan-500/50 shadow-sm'
+                        : 'bg-slate-950/50 text-slate-300 border border-slate-800 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-cyan-400 to-indigo-500 shadow-sm" />
+                      <div>
+                        <div className="font-semibold text-xs text-slate-200">Hyper Liquid Glass</div>
+                        <div className="text-[10px] text-slate-400">Frosted neon glassmorphism</div>
+                      </div>
+                    </div>
+                    {theme === 'liquid-glass' && <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                  </button>
+
+                  {/* Aurora Glass */}
+                  <button
+                    onClick={() => {
+                      setTheme('aurora-glass');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all text-left ${
+                      theme === 'aurora-glass'
+                        ? 'bg-emerald-950/70 text-emerald-200 border border-emerald-500/50 shadow-sm'
+                        : 'bg-slate-950/50 text-slate-300 border border-slate-800 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-500 shadow-sm" />
+                      <div>
+                        <div className="font-semibold text-xs text-slate-200">Aurora Liquid Glass</div>
+                        <div className="text-[10px] text-slate-400">Emerald northern lights</div>
+                      </div>
+                    </div>
+                    {theme === 'aurora-glass' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                  </button>
+
+                  {/* Obsidian Onyx Glass */}
+                  <button
+                    onClick={() => {
+                      setTheme('obsidian-glass');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all text-left ${
+                      theme === 'obsidian-glass'
+                        ? 'bg-amber-950/70 text-amber-200 border border-amber-500/50 shadow-sm'
+                        : 'bg-slate-950/50 text-slate-300 border border-slate-800 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-amber-400 to-slate-900 shadow-sm" />
+                      <div>
+                        <div className="font-semibold text-xs text-slate-200">Obsidian Onyx Glass</div>
+                        <div className="text-[10px] text-slate-400">Deep gold specular dark</div>
+                      </div>
+                    </div>
+                    {theme === 'obsidian-glass' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  </button>
+
+                  {/* Clean Light (สว่าง คลีนๆ) */}
+                  <button
+                    onClick={() => {
+                      setTheme('clean-light');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all text-left ${
+                      theme === 'clean-light'
+                        ? 'bg-sky-100 text-sky-900 border border-sky-400 shadow-sm'
+                        : 'bg-slate-950/50 text-slate-300 border border-slate-800 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-white border border-slate-300 shadow-sm flex items-center justify-center text-amber-500">
+                        <Sun className="w-2.5 h-2.5" />
+                      </div>
+                      <div>
+                        <div className="font-semibold text-xs text-slate-200">Clean Light (สว่าง คลีนๆ)</div>
+                        <div className="text-[10px] text-slate-400">Minimalist bright layout</div>
+                      </div>
+                    </div>
+                    {theme === 'clean-light' && <Check className="w-3.5 h-3.5 text-sky-600" />}
+                  </button>
+
+                  {/* Clean Dark (ดำ คลีนๆ) */}
+                  <button
+                    onClick={() => {
+                      setTheme('clean-dark');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all text-left ${
+                      theme === 'clean-dark'
+                        ? 'bg-slate-800 text-slate-100 border border-slate-600 shadow-sm'
+                        : 'bg-slate-950/50 text-slate-300 border border-slate-800 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-black border border-slate-700 shadow-sm flex items-center justify-center text-slate-300">
+                        <Moon className="w-2.5 h-2.5" />
+                      </div>
+                      <div>
+                        <div className="font-semibold text-xs text-slate-200">Clean Dark (ดำ คลีนๆ)</div>
+                        <div className="text-[10px] text-slate-400">Pitch black distraction-free</div>
+                      </div>
+                    </div>
+                    {theme === 'clean-dark' && <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                  </button>
+
+                  {/* Default Cyber Dark */}
+                  <button
+                    onClick={() => {
+                      setTheme('default');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg transition-all text-left ${
+                      theme === 'default'
+                        ? 'bg-indigo-950/70 text-indigo-200 border border-indigo-500/50 shadow-sm'
+                        : 'bg-slate-950/50 text-slate-300 border border-slate-800 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-700 shadow-sm" />
+                      <div>
+                        <div className="font-semibold text-xs text-slate-200">Cyber Studio (Default)</div>
+                        <div className="text-[10px] text-slate-400">Classic matte slate layout</div>
+                      </div>
+                    </div>
+                    {theme === 'default' && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Settings Button */}
         <button

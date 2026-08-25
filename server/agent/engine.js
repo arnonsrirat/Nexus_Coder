@@ -2,6 +2,8 @@ import os from 'os';
 import { toolDefinitions, ToolExecutor } from './tools.js';
 import { generateRepoMap } from './repoMap.js';
 import { OpenRouterClient } from './openrouter.js';
+import { McpManager } from './mcpManager.js';
+import { SkillsManager } from './skillsManager.js';
 
 export const SYSTEM_PROMPT_AGENT = `You are NexusCoder, an elite autonomous AI coding agent operating inside the user's project workspace.
 
@@ -152,8 +154,15 @@ function sleep(ms, signal) {
 export class AgentEngine {
   constructor() {
     this.openrouter = new OpenRouterClient('');
-    this.toolExecutor = new ToolExecutor(null);
+    this.mcpManager = new McpManager(this.workspaceRoot);
+    this.skillsManager = new SkillsManager();
+    this.toolExecutor = new ToolExecutor(null, { mcpManager: this.mcpManager });
     this.workspaceRoot = null;
+
+    // Relay MCP & Skills events to agent listeners / WebSocket clients
+    this.mcpManager.on('servers_updated', (data) => this.emit('mcp_servers_updated', data));
+    this.skillsManager.on('skills_updated', (data) => this.emit('skills_updated', data));
+    this.mcpManager.autoConnectEnabled();
     this.model = 'anthropic/claude-3.7-sonnet';
     this.mode = 'agent'; // 'agent' | 'plan' | 'ask' | 'system'
     this.reasoningEffort = 'medium'; // 'high' | 'medium' | 'low' | 'off'
@@ -470,6 +479,9 @@ export class AgentEngine {
   setWorkspace(dir) {
     this.workspaceRoot = dir;
     this.toolExecutor.setWorkspaceRoot(dir);
+    if (this.mcpManager) {
+      this.mcpManager.setWorkspace(dir);
+    }
     this.emit('workspace_updated', { workspaceRoot: dir });
   }
 
@@ -518,10 +530,15 @@ export class AgentEngine {
   }
 
   getToolsForMode() {
+    const mcpTools = this.mcpManager ? this.mcpManager.getOpenAiTools() : [];
+
     if (this.mode === 'ask') {
-      return toolDefinitions.filter(t => 
-        ['read_file', 'list_dir', 'search_code', 'update_canvas', 'ask_user'].includes(t.function.name)
-      );
+      return [
+        ...toolDefinitions.filter(t => 
+          ['read_file', 'list_dir', 'search_code', 'update_canvas', 'ask_user'].includes(t.function.name)
+        ),
+        ...mcpTools
+      ];
     }
     if (this.mode === 'plan') {
       return toolDefinitions.filter(t => 
@@ -529,11 +546,14 @@ export class AgentEngine {
       );
     }
     if (this.mode === 'system') {
-      return toolDefinitions.filter(t => 
-        ['get_system_info', 'list_processes', 'kill_process', 'get_network_info', 'run_command', 'read_file', 'write_file', 'apply_diff', 'list_dir', 'search_code', 'update_plan', 'update_canvas', 'ask_user'].includes(t.function.name)
-      );
+      return [
+        ...toolDefinitions.filter(t => 
+          ['get_system_info', 'list_processes', 'kill_process', 'get_network_info', 'run_command', 'read_file', 'write_file', 'apply_diff', 'list_dir', 'search_code', 'update_plan', 'update_canvas', 'ask_user'].includes(t.function.name)
+        ),
+        ...mcpTools
+      ];
     }
-    return toolDefinitions; // all tools for agent mode
+    return [...toolDefinitions, ...mcpTools]; // all tools + active MCP tools for agent mode
   }
 
   getSystemPromptForMode() {
@@ -570,6 +590,17 @@ export class AgentEngine {
       iteration: 1
     });
 
+    // Check for AI skill slash commands (e.g. /review, /sql, /test, etc.)
+    const { matchedSkill, cleanPrompt } = this.skillsManager ? this.skillsManager.matchSlashCommand(userPrompt) : { matchedSkill: null, cleanPrompt: userPrompt };
+    const skillsAugmentation = this.skillsManager ? this.skillsManager.getSkillsPromptAugmentation(matchedSkill) : '';
+
+    // If MCP servers are connected, add a contextual note
+    let mcpNote = '';
+    const mcpStatus = this.mcpManager ? this.mcpManager.getServersStatus() : null;
+    if (mcpStatus?.summary?.connectedCount > 0) {
+      mcpNote = `\n\n### Model Context Protocol (MCP) Integration Active:\n${mcpStatus.summary.connectedCount} MCP server(s) connected with ${mcpStatus.summary.totalToolsCount} dynamic tools available (prefixed with 'mcp__'). Use them when requested or relevant.`;
+    }
+
     // Prepare system prompt with workspace repo map or host system overview
     let contextAttachment = '';
     if (this.mode === 'system') {
@@ -588,11 +619,12 @@ export class AgentEngine {
     const modePrompt = this.getSystemPromptForMode();
     const systemMessage = {
       role: 'system',
-      content: `${modePrompt}${contextAttachment}`
+      content: `${modePrompt}${skillsAugmentation}${mcpNote}${contextAttachment}`
     };
 
     // Prepare user message
-    let fullUserContent = userPrompt;
+    const promptToSend = matchedSkill ? cleanPrompt : userPrompt;
+    let fullUserContent = promptToSend;
     if (attachedFiles && attachedFiles.length > 0) {
       const fileContexts = [];
       for (const f of attachedFiles) {
@@ -604,7 +636,7 @@ export class AgentEngine {
         } catch (e) {}
       }
       if (fileContexts.length > 0) {
-        fullUserContent = `${userPrompt}\n\n### Attached Files Context:\n${fileContexts.join('\n\n')}`;
+        fullUserContent = `${promptToSend}\n\n### Attached Files Context:\n${fileContexts.join('\n\n')}`;
       }
     }
 

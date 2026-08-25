@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { OpenRouterClient } from '../agent/openrouter.js';
+import { BUILTIN_MCP_TEMPLATES } from '../agent/mcpManager.js';
 
 export function createApiRouter(agentEngine, configStore, appVersion = '0.0.0', appUpdater = null) {
   const router = express.Router();
@@ -404,6 +405,127 @@ export function createApiRouter(agentEngine, configStore, appVersion = '0.0.0', 
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── MCP (Model Context Protocol) API Routes ─────────────────────────────────
+  router.get('/mcp/servers', (req, res) => {
+    if (!agentEngine.mcpManager) {
+      return res.status(500).json({ error: 'MCP Manager not initialized' });
+    }
+    res.json(agentEngine.mcpManager.getServersStatus());
+  });
+
+  router.get('/mcp/templates', (req, res) => {
+    res.json({ templates: BUILTIN_MCP_TEMPLATES });
+  });
+
+  router.post('/mcp/servers', (req, res) => {
+    if (!agentEngine.mcpManager) {
+      return res.status(500).json({ error: 'MCP Manager not initialized' });
+    }
+    try {
+      const server = agentEngine.mcpManager.addOrUpdateServer(req.body);
+      res.json({ success: true, server: server ? server.toJSON() : null });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.delete('/mcp/servers/:id', (req, res) => {
+    if (!agentEngine.mcpManager) {
+      return res.status(500).json({ error: 'MCP Manager not initialized' });
+    }
+    const success = agentEngine.mcpManager.removeServer(req.params.id);
+    res.json({ success });
+  });
+
+  router.post('/mcp/servers/:id/connect', async (req, res) => {
+    if (!agentEngine.mcpManager) {
+      return res.status(500).json({ error: 'MCP Manager not initialized' });
+    }
+    try {
+      const serverData = await agentEngine.mcpManager.connectServer(req.params.id);
+      res.json({ success: true, server: serverData });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/mcp/servers/:id/disconnect', async (req, res) => {
+    if (!agentEngine.mcpManager) {
+      return res.status(500).json({ error: 'MCP Manager not initialized' });
+    }
+    try {
+      const serverData = await agentEngine.mcpManager.disconnectServer(req.params.id);
+      res.json({ success: true, server: serverData });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/mcp/servers/:id/test', async (req, res) => {
+    if (!agentEngine.mcpManager) {
+      return res.status(500).json({ error: 'MCP Manager not initialized' });
+    }
+    try {
+      const server = agentEngine.mcpManager.servers.get(req.params.id);
+      if (!server) return res.status(404).json({ error: 'Server not found' });
+      const pingOk = await server.ping();
+      res.json({ success: pingOk, latencyMs: server.latencyMs, server: server.toJSON() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── AI Skills API Routes ───────────────────────────────────────────────────
+  router.get('/skills', (req, res) => {
+    if (!agentEngine.skillsManager) {
+      return res.status(500).json({ error: 'Skills Manager not initialized' });
+    }
+    res.json({
+      skills: agentEngine.skillsManager.getAllSkills(),
+      active: agentEngine.skillsManager.getActiveSkills()
+    });
+  });
+
+  router.post('/skills', (req, res) => {
+    if (!agentEngine.skillsManager) {
+      return res.status(500).json({ error: 'Skills Manager not initialized' });
+    }
+    try {
+      const skill = agentEngine.skillsManager.addOrUpdateSkill(req.body);
+      res.json({ success: true, skill });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/skills/:id/toggle', (req, res) => {
+    if (!agentEngine.skillsManager) {
+      return res.status(500).json({ error: 'Skills Manager not initialized' });
+    }
+    try {
+      const skill = agentEngine.skillsManager.toggleSkill(req.params.id, req.body?.enabled);
+      res.json({ success: true, skill });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.delete('/skills/:id', (req, res) => {
+    if (!agentEngine.skillsManager) {
+      return res.status(500).json({ error: 'Skills Manager not initialized' });
+    }
+    const success = agentEngine.skillsManager.deleteSkill(req.params.id);
+    res.json({ success });
+  });
+
+  router.post('/skills/reset-builtins', (req, res) => {
+    if (!agentEngine.skillsManager) {
+      return res.status(500).json({ error: 'Skills Manager not initialized' });
+    }
+    agentEngine.skillsManager.resetToDefaults(true);
+    res.json({ success: true, skills: agentEngine.skillsManager.getAllSkills() });
   });
 
   return router;

@@ -327,14 +327,34 @@ export class ToolExecutor {
     this.workspaceRoot = workspaceRoot;
     this.onApprovalRequest = options.onApprovalRequest || null;
     this.autoApprove = options.autoApprove || false;
+    this.mcpManager = options.mcpManager || null;
   }
 
   setWorkspaceRoot(root) {
     this.workspaceRoot = root;
+    if (this.mcpManager) {
+      this.mcpManager.setWorkspace(root);
+    }
+  }
+
+  setMcpManager(manager) {
+    this.mcpManager = manager;
   }
 
   async execute(toolName, args, onStatusUpdate = () => {}) {
     try {
+      // Delegate Model Context Protocol (MCP) tools
+      if (toolName.startsWith('mcp__')) {
+        if (!this.mcpManager) {
+          return { error: 'MCP Manager is not initialized on the server.' };
+        }
+        onStatusUpdate({
+          type: 'mcp_tool_executing',
+          toolName
+        });
+        return await this.mcpManager.executeTool(toolName, args);
+      }
+
       switch (toolName) {
         case 'get_system_info':
           return await this.getSystemInfo();

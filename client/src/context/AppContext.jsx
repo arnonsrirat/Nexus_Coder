@@ -24,6 +24,13 @@ export function AppProvider({ children }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
+  const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
+  const [isSkillsModalOpen, setIsSkillsModalOpen] = useState(false);
+  const [mcpServers, setMcpServers] = useState([]);
+  const [mcpSummary, setMcpSummary] = useState({ totalServers: 0, connectedCount: 0, totalToolsCount: 0, hasConnected: false });
+  const [mcpTemplates, setMcpTemplates] = useState([]);
+  const [skills, setSkills] = useState([]);
+  const [activeSkills, setActiveSkills] = useState([]);
   const [recentWorkspaces, setRecentWorkspaces] = useState([]);
   const [appVersion, setAppVersion] = useState('');
   const [theme, setThemeState] = useState(() => {
@@ -215,7 +222,113 @@ export function AppProvider({ children }) {
     api.fetchChats()
       .then(cList => cList.chats && setChatSessions(cList.chats))
       .catch(err => console.error('Failed to load chat history:', err));
+
+    // Load MCP and AI Skills data
+    api.fetchMcpServers()
+      .then(res => {
+        if (res?.servers) setMcpServers(res.servers);
+        if (res?.summary) setMcpSummary(res.summary);
+      })
+      .catch(err => console.warn('Failed to load MCP servers:', err));
+
+    api.fetchMcpTemplates()
+      .then(res => {
+        if (res?.templates) setMcpTemplates(res.templates);
+      })
+      .catch(err => console.warn('Failed to load MCP templates:', err));
+
+    api.fetchSkills()
+      .then(res => {
+        if (res?.skills) {
+          setSkills(res.skills);
+          setActiveSkills(res.active || res.skills.filter(s => s.enabled));
+        }
+      })
+      .catch(err => console.warn('Failed to load skills:', err));
   }, []);
+
+  // MCP & Skills Management Handlers
+  const loadMcpData = useCallback(async () => {
+    try {
+      const [serversRes, tplRes] = await Promise.allSettled([
+        api.fetchMcpServers(),
+        api.fetchMcpTemplates()
+      ]);
+      if (serversRes.status === 'fulfilled' && serversRes.value) {
+        setMcpServers(serversRes.value.servers || []);
+        setMcpSummary(serversRes.value.summary || {});
+      }
+      if (tplRes.status === 'fulfilled' && tplRes.value?.templates) {
+        setMcpTemplates(tplRes.value.templates);
+      }
+    } catch (e) {
+      console.warn('Failed to refresh MCP data:', e);
+    }
+  }, []);
+
+  const loadSkillsData = useCallback(async () => {
+    try {
+      const res = await api.fetchSkills();
+      if (res?.skills) {
+        setSkills(res.skills);
+        setActiveSkills(res.active || res.skills.filter(s => s.enabled));
+      }
+    } catch (e) {
+      console.warn('Failed to refresh skills data:', e);
+    }
+  }, []);
+
+  const connectMcpServer = async (id) => {
+    const res = await api.connectMcpServer(id);
+    await loadMcpData();
+    return res;
+  };
+
+  const disconnectMcpServer = async (id) => {
+    const res = await api.disconnectMcpServer(id);
+    await loadMcpData();
+    return res;
+  };
+
+  const saveMcpServer = async (serverConfig) => {
+    const res = await api.saveMcpServer(serverConfig);
+    await loadMcpData();
+    return res;
+  };
+
+  const deleteMcpServer = async (id) => {
+    const res = await api.deleteMcpServer(id);
+    await loadMcpData();
+    return res;
+  };
+
+  const testMcpServer = async (id) => {
+    return await api.testMcpServer(id);
+  };
+
+  const toggleSkill = async (id, enabled = null) => {
+    const res = await api.toggleSkill(id, enabled);
+    await loadSkillsData();
+    return res;
+  };
+
+  const saveSkill = async (skillData) => {
+    const res = await api.saveSkill(skillData);
+    await loadSkillsData();
+    return res;
+  };
+
+  const deleteSkill = async (id) => {
+    const res = await api.deleteSkill(id);
+    await loadSkillsData();
+    return res;
+  };
+
+  const resetBuiltinSkills = async () => {
+    const res = await api.resetBuiltinSkills();
+    await loadSkillsData();
+    return res;
+  };
 
   // Refresh Workspace Tree.
   // Deliberately has no reactive dependencies: it reads the current workspace
@@ -321,6 +434,15 @@ export function AppProvider({ children }) {
 
             if (data.contextStats) setContextStats(data.contextStats);
 
+            if (data.mcp) {
+              if (Array.isArray(data.mcp.servers)) setMcpServers(data.mcp.servers);
+              if (data.mcp.summary) setMcpSummary(data.mcp.summary);
+            }
+            if (Array.isArray(data.skills)) {
+              setSkills(data.skills);
+              setActiveSkills(data.skills.filter(s => s.enabled));
+            }
+
             if (data.isPausedForInput && data.pendingAction) {
               setPendingPrompt(data.pendingAction);
               setAgentStatus('waiting_input');
@@ -328,6 +450,20 @@ export function AppProvider({ children }) {
               setAgentStatus('streaming');
             } else {
               setAgentStatus('idle');
+            }
+            break;
+
+          case 'mcp_servers_updated':
+            if (data) {
+              if (Array.isArray(data.servers)) setMcpServers(data.servers);
+              if (data.summary) setMcpSummary(data.summary);
+            }
+            break;
+
+          case 'skills_updated':
+            if (data) {
+              if (Array.isArray(data.skills)) setSkills(data.skills);
+              if (Array.isArray(data.activeSkills)) setActiveSkills(data.activeSkills);
             }
             break;
 
@@ -1190,7 +1326,24 @@ export function AppProvider({ children }) {
     checkUpdates,
     startDownloadUpdate,
     applyUpdate,
-    clearUpdateCache
+    clearUpdateCache,
+
+    // MCP Actions
+    loadMcpData,
+    refreshMcp: loadMcpData,
+    connectMcpServer,
+    disconnectMcpServer,
+    saveMcpServer,
+    deleteMcpServer,
+    testMcpServer,
+
+    // AI Skills Actions
+    loadSkillsData,
+    refreshSkills: loadSkillsData,
+    toggleSkill,
+    saveSkill,
+    deleteSkill,
+    resetBuiltinSkills
   };
 
   const actions = useMemo(() => {
@@ -1243,9 +1396,20 @@ export function AppProvider({ children }) {
     setIsFolderPickerOpen,
     isNewSessionModalOpen,
     setIsNewSessionModalOpen,
+    isMcpModalOpen,
+    setIsMcpModalOpen,
+    isSkillsModalOpen,
+    setIsSkillsModalOpen,
     recentWorkspaces,
     appVersion,
     theme,
+
+    // MCP & AI Skills
+    mcpServers,
+    mcpSummary,
+    mcpTemplates,
+    skills,
+    activeSkills,
 
     // Resizable & Customizable Layout
     panelSizes,
@@ -1316,7 +1480,8 @@ export function AppProvider({ children }) {
     ...actions
   }), [
     hasApiKey, model, models, autoApprove, isSettingsOpen, isFolderPickerOpen, isNewSessionModalOpen,
-    recentWorkspaces, appVersion, theme,
+    isMcpModalOpen, isSkillsModalOpen, recentWorkspaces, appVersion, theme,
+    mcpServers, mcpSummary, mcpTemplates, skills, activeSkills,
     panelSizes, panelOrder, panelVisibility, resizePanel, resetPanel,
     resetAllPanels, togglePanelVisibility, setPanelVisibility, movePanel,
     reorderPanels, resetLayout,

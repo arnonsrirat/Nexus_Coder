@@ -11,6 +11,8 @@ import SettingsModal from './components/Modals/SettingsModal';
 import FolderPickerModal from './components/Modals/FolderPickerModal';
 import UpdateModal from './components/Modals/UpdateModal';
 import NewSessionModal from './components/Modals/NewSessionModal';
+import McpModal from './components/Modals/McpModal';
+import SkillsModal from './components/Modals/SkillsModal';
 import ResizeHandle from './components/ResizeHandle';
 import {
   Folder,
@@ -291,6 +293,8 @@ export default function App() {
       <FolderPickerModal />
       <UpdateModal />
       <NewSessionModal />
+      <McpModal />
+      <SkillsModal />
     </div>
   );
 }

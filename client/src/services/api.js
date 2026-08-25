@@ -194,4 +194,125 @@ export async function cleanUpdateCache() {
   return res.json();
 }
 
+// ── MCP (Model Context Protocol) Client APIs ─────────────────────────────────
+export async function fetchMcpServers() {
+  const res = await fetch(`${API_BASE}/mcp/servers`);
+  if (!res.ok) throw new Error('Failed to fetch MCP servers');
+  return res.json();
+}
+
+export async function fetchMcpTemplates() {
+  const res = await fetch(`${API_BASE}/mcp/templates`);
+  if (!res.ok) throw new Error('Failed to fetch MCP templates');
+  return res.json();
+}
+
+export async function saveMcpServer(serverConfig) {
+  const res = await fetch(`${API_BASE}/mcp/servers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(serverConfig)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to save MCP server');
+  }
+  return res.json();
+}
+
+export async function deleteMcpServer(id) {
+  const res = await fetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Failed to delete MCP server');
+  return res.json();
+}
+
+export async function connectMcpServer(id) {
+  const res = await fetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/connect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to connect MCP server');
+  }
+  return res.json();
+}
+
+export async function disconnectMcpServer(id) {
+  const res = await fetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/disconnect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to disconnect MCP server');
+  }
+  return res.json();
+}
+
+export async function testMcpServer(id) {
+  const res = await fetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to test MCP server');
+  }
+  return res.json();
+}
+
+// ── AI Skills Client APIs ───────────────────────────────────────────────────
+export async function fetchSkills() {
+  const res = await fetch(`${API_BASE}/skills`);
+  if (!res.ok) throw new Error('Failed to fetch AI skills');
+  return res.json();
+}
+
+export async function saveSkill(skillData) {
+  const res = await fetch(`${API_BASE}/skills`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(skillData)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to save AI skill');
+  }
+  return res.json();
+}
+
+export async function toggleSkill(id, enabled) {
+  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(id)}/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to toggle AI skill');
+  }
+  return res.json();
+}
+
+export async function deleteSkill(id) {
+  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Failed to delete AI skill');
+  return res.json();
+}
+
+export async function resetBuiltinSkills() {
+  const res = await fetch(`${API_BASE}/skills/reset-builtins`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) throw new Error('Failed to reset AI skills to defaults');
+  return res.json();
+}
+
+
 

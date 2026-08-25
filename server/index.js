@@ -311,7 +311,9 @@ wss.on('connection', (ws) => {
       messages: agentEngine.uiMessages,
       activePlan: agentEngine.activePlan,
       activeCanvas: agentEngine.activeCanvas,
-      contextStats: agentEngine.getContextStats()
+      contextStats: agentEngine.getContextStats(),
+      mcp: agentEngine.mcpManager ? agentEngine.mcpManager.getServersStatus() : null,
+      skills: agentEngine.skillsManager ? agentEngine.skillsManager.getAllSkills() : []
     }
   }));
 

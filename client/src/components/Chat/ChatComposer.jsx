@@ -9,7 +9,10 @@ import {
   Image as ImageIcon,
   Film,
   X,
-  Maximize2
+  Maximize2,
+  Sparkles,
+  Zap,
+  Tag
 } from 'lucide-react';
 
 /**
@@ -27,13 +30,17 @@ export default function ChatComposer() {
     workspaceRoot,
     pinnedContextFiles,
     togglePinContextFile,
-    isAgentBusy
+    isAgentBusy,
+    skills,
+    activeSkills,
+    setIsSkillsModalOpen
   } = useApp();
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [attachedMedia, setAttachedMedia] = useState([]);
   const [lightboxMedia, setLightboxMedia] = useState(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -158,7 +165,45 @@ export default function ChatComposer() {
     }
   };
 
+  // Slash Command Autocomplete Logic
+  const isTypingSlash = inputPrompt.startsWith('/') && !inputPrompt.includes(' ') && !inputPrompt.includes('\n');
+  const matchedSlashSkills = isTypingSlash
+    ? (skills || []).filter(s => s.slashCommand && s.slashCommand.toLowerCase().includes(inputPrompt.toLowerCase()))
+    : [];
+
+  const handleSelectSlashCommand = (cmd) => {
+    setInputPrompt(`${cmd} `);
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  };
+
   const handleKeyDown = (e) => {
+    if (isTypingSlash && matchedSlashSkills.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSlashIndex(prev => (prev + 1) % matchedSlashSkills.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSlashIndex(prev => (prev - 1 + matchedSlashSkills.length) % matchedSlashSkills.length);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const selected = matchedSlashSkills[selectedSlashIndex] || matchedSlashSkills[0];
+        if (selected?.slashCommand) {
+          handleSelectSlashCommand(selected.slashCommand);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        // Clear or do nothing
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -167,6 +212,7 @@ export default function ChatComposer() {
 
   const handleTextareaInput = (e) => {
     setInputPrompt(e.target.value);
+    setSelectedSlashIndex(0);
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
   };
@@ -178,11 +224,29 @@ export default function ChatComposer() {
 
   return (
     <div
-      className="p-4 border-t border-slate-800/80 bg-slate-950/80 backdrop-blur select-none"
+      className="p-4 border-t border-slate-800/80 bg-slate-950/80 backdrop-blur select-none relative"
       onPaste={handlePaste}
     >
       {/* Mode Selector (Agent / Plan / Ask) & Reasoning Level */}
-      <ModeSelector />
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <ModeSelector />
+
+        {/* Active Skills Indicator Pill */}
+        {activeSkills && activeSkills.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setIsSkillsModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/60 border border-purple-500/40 text-purple-300 text-xs hover:bg-purple-900/60 transition-all cursor-pointer shadow-sm"
+            title="Active AI Skills augment agent prompts and workflows. Click to manage."
+          >
+            <Sparkles className="w-3 h-3 text-purple-400" />
+            <span className="font-semibold text-[11px]">Active Skills:</span>
+            <span className="font-mono text-[11px] font-bold bg-purple-900/80 px-1.5 py-0.2 rounded-full border border-purple-400/40">
+              {activeSkills.length}
+            </span>
+          </button>
+        )}
+      </div>
 
       {/* Hidden File Input for Images & Videos */}
       <input
@@ -193,6 +257,37 @@ export default function ChatComposer() {
         onChange={handleFileInputChange}
         className="hidden"
       />
+
+      {/* Slash Command Autocomplete Popover */}
+      {isTypingSlash && matchedSlashSkills.length > 0 && (
+        <div className="absolute bottom-24 left-4 right-4 z-30 max-w-lg bg-slate-900/95 border border-purple-500/50 rounded-xl p-2 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95">
+          <div className="text-[10px] font-mono text-purple-400 uppercase tracking-wider px-2 py-1 flex items-center justify-between border-b border-slate-800">
+            <span>AI Skills & Slash Commands</span>
+            <span className="text-slate-500">Tab or Enter to select</span>
+          </div>
+          <div className="max-h-48 overflow-y-auto mt-1 space-y-1">
+            {matchedSlashSkills.map((skill, index) => (
+              <div
+                key={skill.id}
+                onClick={() => handleSelectSlashCommand(skill.slashCommand)}
+                className={`p-2 rounded-lg cursor-pointer flex items-center justify-between text-xs transition-all ${
+                  index === selectedSlashIndex
+                    ? 'bg-purple-950 text-purple-200 border border-purple-500/60 shadow-sm'
+                    : 'hover:bg-slate-800/80 text-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-purple-300 bg-purple-950/80 px-1.5 py-0.5 rounded border border-purple-500/40">
+                    {skill.slashCommand}
+                  </span>
+                  <span className="font-semibold text-slate-200">{skill.name}</span>
+                </div>
+                <span className="text-[11px] text-slate-400 max-w-[200px] truncate">{skill.description}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <form
         onSubmit={handleSubmit}

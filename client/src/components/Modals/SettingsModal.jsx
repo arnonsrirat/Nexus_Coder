@@ -71,7 +71,7 @@ export default function SettingsModal() {
     },
     {
       id: 'liquid-glass',
-      name: 'Liquid Glass',
+      name: 'Hyper Liquid Glass',
       desc: 'Frosted cyan-neon blur',
       previewBg: 'linear-gradient(135deg, rgba(6,182,212,0.4), rgba(99,102,241,0.4))',
       accentColor: '#38bdf8'
@@ -89,6 +89,20 @@ export default function SettingsModal() {
       desc: 'Deep gold specular',
       previewBg: 'linear-gradient(135deg, rgba(245,158,11,0.35), rgba(15,15,22,0.8))',
       accentColor: '#fbbf24'
+    },
+    {
+      id: 'clean-light',
+      name: 'Clean Minimal Light',
+      desc: 'Bright clean distraction-free',
+      previewBg: 'linear-gradient(135deg, #ffffff, #f1f5f9)',
+      accentColor: '#0284c7'
+    },
+    {
+      id: 'clean-dark',
+      name: 'Clean Minimal Dark',
+      desc: 'Deep black distraction-free',
+      previewBg: 'linear-gradient(135deg, #000000, #121215)',
+      accentColor: '#38bdf8'
     }
   ];
 
